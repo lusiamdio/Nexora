@@ -1,0 +1,414 @@
+export type EventFormat = 'in_person' | 'online' | 'hybrid';
+export type EventCategory = 
+  | 'Concerts & Music'
+  | 'Tech & Innovation'
+  | 'Food & Wine'
+  | 'Arts & Culture'
+  | 'Business & Summits'
+  | 'Sports & Wellness'
+  | 'Nightlife & Parties'
+  | 'Faith & Community';
+
+export interface AgendaItem {
+  id?: string;
+  time: string;
+  title: string;
+  description?: string;
+  speaker?: string;
+  stage?: string;
+  track?: string;
+}
+
+export interface Performer {
+  name: string;
+  role: string;
+  avatar?: string;
+}
+
+export interface TicketTier {
+  id: string;
+  eventId: string;
+  name: string;
+  description: string;
+  priceMinor: number; // in integer cents/minor units (e.g., 25000 = 250.00)
+  currency: string;
+  capacity: number;
+  remaining: number;
+  minPerOrder: number;
+  maxPerOrder: number;
+  salesStart: string;
+  salesEnd: string;
+  status: 'active' | 'sold_out' | 'paused';
+}
+
+export interface Event {
+  id: string;
+  slug: string;
+  title: string;
+  category: EventCategory;
+  format: EventFormat;
+  description: string;
+  shortSummary: string;
+  coverImage: string;
+  bannerImage?: string;
+  gallery?: string[];
+  startDate: string; // ISO
+  endDate: string; // ISO
+  timezone: string;
+  venue: {
+    name: string;
+    address: string;
+    city: string;
+    country: string;
+    postalCode?: string;
+    coordinates?: { lat: number; lng: number };
+  };
+  virtualUrl?: string;
+  organizer: {
+    id: string;
+    name: string;
+    verified: boolean;
+    rating: number;
+    avatar?: string;
+    bio?: string;
+  };
+  tickets: TicketTier[];
+  status: 'published' | 'draft' | 'cancelled' | 'ended';
+  featured: boolean;
+  ageRestriction?: string;
+  refundPolicy: string;
+  tags: string[];
+  agenda?: AgendaItem[];
+  performers?: Performer[];
+  currency: string;
+  minPriceMinor: number;
+  capacityCap?: number;
+  visibility?: 'public' | 'unlisted' | 'private' | 'invitation';
+  sponsors?: { id: string; name: string; tier: string; logo?: string; url?: string }[];
+  faqs?: { id: string; question: string; answer: string }[];
+  customQuestions?: { id: string; label: string; type: 'text' | 'dropdown' | 'checkbox'; required: boolean; options?: string[] }[];
+  themePreset?: string;
+  seoMetadata?: { title: string; description: string; slug: string };
+  payoutSettings?: { bankName: string; accountNumber: string; currency: string; accountHolder?: string };
+}
+
+export interface OrderItem {
+  tierId: string;
+  tierName: string;
+  quantity: number;
+  unitPriceMinor: number;
+  totalPriceMinor: number;
+}
+
+export interface Order {
+  id: string;
+  orderReference: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  eventId: string;
+  eventTitle: string;
+  items: OrderItem[];
+  subtotalMinor: number;
+  feeMinor: number;
+  discountMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+  currency: string;
+  paymentStatus: 'created' | 'pending' | 'processing' | 'succeeded' | 'failed' | 'refunded';
+  paymentMethod: string;
+  paymentProvider: 'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'stripe_card' | 'sandbox';
+  transactionReference: string;
+  promoCodeApplied?: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface Ticket {
+  id: string;
+  ticketCode: string; // e.g. NX-TKT-84920
+  token: string; // cryptographic validation token
+  orderId: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventVenue: string;
+  tierId: string;
+  tierName: string;
+  attendeeName: string;
+  attendeeEmail: string;
+  attendeePhone: string;
+  priceMinor: number;
+  currency: string;
+  status: 'valid' | 'checked_in' | 'cancelled' | 'refunded';
+  checkedInAt?: string;
+  checkedInBy?: string;
+  gate?: string;
+  qrPayload: string;
+  refundReason?: string;
+  customAnswers?: Record<string, string>;
+}
+
+export interface CheckInLog {
+  id: string;
+  ticketId: string;
+  ticketCode: string;
+  eventId: string;
+  timestamp: string;
+  staffName: string;
+  gate: string;
+  result: 'valid' | 'already_checked_in' | 'invalid' | 'refunded' | 'wrong_event';
+  message: string;
+  offlineSync?: boolean;
+}
+
+export interface LedgerEntry {
+  id: string;
+  orderId?: string;
+  eventId?: string;
+  organizerId: string;
+  type: 'customer_clearing' | 'organizer_payable' | 'platform_commission' | 'processing_fee' | 'payout_transfer' | 'refund_reserve' | 'refund_reversal';
+  debitMinor: number;
+  creditMinor: number;
+  currency: string;
+  description: string;
+  timestamp: string;
+}
+
+export interface RefundRequest {
+  id: string;
+  ticketId: string;
+  ticketCode: string;
+  orderId: string;
+  eventId: string;
+  eventTitle: string;
+  attendeeEmail: string;
+  attendeeName: string;
+  reason: string;
+  amountMinor: number;
+  currency: string;
+  status: 'pending' | 'approved' | 'rejected' | 'processed';
+  requestedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
+}
+
+export interface PromoCode {
+  id: string;
+  code: string;
+  discountPercentage: number;
+  maxUses: number;
+  timesUsed: number;
+  eventId?: string; // all events if undefined
+  active: boolean;
+}
+
+export interface TeamMember {
+  id: string;
+  organizationId: string;
+  name: string;
+  email: string;
+  role: 'Organization Owner' | 'Administrator' | 'Event Manager' | 'Finance Manager' | 'Check-In Staff' | 'Read-Only Analyst';
+  invitedAt: string;
+  status: 'active' | 'invited';
+}
+
+export interface ThirdPartyIntegration {
+  id: string;
+  name: string;
+  category: 'payment' | 'marketing' | 'messaging' | 'streaming' | 'accounting' | 'developer';
+  categoryLabel: string;
+  iconName: string;
+  description: string;
+  status: 'connected' | 'disconnected' | 'needs_setup';
+  badge?: string;
+  lastSyncedAt?: string;
+  docsUrl?: string;
+  config: {
+    apiKey?: string;
+    apiSecret?: string;
+    webhookUrl?: string;
+    accountId?: string;
+    senderIdOrChannel?: string;
+    mode?: 'live' | 'sandbox';
+    autoSync?: boolean;
+    features?: Record<string, boolean>;
+    customMetadata?: Record<string, string>;
+  };
+  metrics?: {
+    syncedRecords?: number;
+    uptime?: string;
+    lastPingStatus?: 'healthy' | 'warning' | 'error';
+    latencyMs?: number;
+  };
+}
+
+export interface CustomWebhookEndpoint {
+  id: string;
+  name: string;
+  url: string;
+  secret: string;
+  events: string[];
+  active: boolean;
+  createdAt: string;
+  lastTriggeredAt?: string;
+  lastResponseCode?: number;
+  lastLatencyMs?: number;
+}
+
+export interface WebhookDeliveryLog {
+  id: string;
+  endpointId: string;
+  endpointName: string;
+  event: string;
+  timestamp: string;
+  statusCode: number;
+  latencyMs: number;
+  payloadSnippet: string;
+  success: boolean;
+}
+
+export interface OrganizerProfile {
+  id: string;
+  name: string;
+  legalEntityName: string;
+  email: string;
+  phone: string;
+  country: string;
+  city: string;
+  address?: string;
+  bio?: string;
+  website?: string;
+  logoUrl?: string;
+  bannerUrl?: string;
+  taxNumber?: string;
+  socialLinks?: {
+    instagram?: string;
+    twitter?: string;
+    linkedin?: string;
+    youtube?: string;
+  };
+  verified: boolean;
+  verificationStatus: 'unverified' | 'pending_kyc' | 'verified' | 'rejected';
+  verificationDocName?: string;
+  subscriptionPlan: 'starter' | 'growth' | 'business';
+  commissionRate: number; // e.g. 0.05 for 5%
+  bankDetails: {
+    bankName: string;
+    accountNumber: string;
+    accountHolder: string;
+    branchCode?: string;
+    accountType?: string;
+  };
+  integrations?: ThirdPartyIntegration[];
+  customWebhooks?: CustomWebhookEndpoint[];
+}
+
+export interface PayoutRequest {
+  id: string;
+  organizerId: string;
+  amountMinor: number;
+  currency: string;
+  status: 'pending' | 'approved' | 'processed' | 'rejected';
+  requestedAt: string;
+  processedAt?: string;
+  destinationAccount: string;
+}
+
+export interface CountryConfig {
+  code: string;
+  name: string;
+  currency: string;
+  currencySymbol: string;
+  flag: string;
+  enabled: boolean;
+  supportedGateways: Array<'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'stripe_card'>;
+  defaultCommissionRate: number;
+}
+
+export interface CountryLaunchGate {
+  countryCode: string;
+  countryName: string;
+  flag: string;
+  wave: number;
+  legalEntityApproved: boolean;
+  paymentProviderLive: boolean;
+  settlementCurrencyConfirmed: boolean;
+  compliantFundsFlowModel: boolean;
+  refundProceduresDocumented: boolean;
+  taxInvoicingReviewed: boolean;
+  privacyPOPIAReady: boolean;
+  supportEscalationTested: boolean;
+  e2eTestPassed: boolean;
+  paidSalesAuthorized: boolean;
+}
+
+export interface WebhookLog {
+  id: string;
+  provider: 'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'stripe_card';
+  eventId: string;
+  eventSignature: string;
+  status: 'verified' | 'signature_mismatch' | 'replayed_duplicate' | 'processed';
+  receivedAt: string;
+  payloadSummary: string;
+  amountMinor?: number;
+  currency?: string;
+}
+
+export interface VenueRFP {
+  id: string;
+  venueName: string;
+  city: string;
+  country: string;
+  contactPerson: string;
+  targetDate: string;
+  expectedAttendees: number;
+  budgetFormatted: string;
+  requirements: string[];
+  status: 'draft' | 'submitted' | 'under_review' | 'accepted';
+  submittedAt: string;
+}
+
+export interface MarketingCampaign {
+  id: string;
+  title: string;
+  type: 'email' | 'promoter' | 'social';
+  audience: string;
+  sentCount: number;
+  openRate: number;
+  conversionRate: number;
+  revenueGeneratedMinor: number;
+  currency: string;
+  status: 'draft' | 'active' | 'completed';
+  scheduledDate: string;
+}
+
+export interface PriorityTask {
+  id: string;
+  title: string;
+  category: 'capacity' | 'refund' | 'kyc' | 'agenda' | 'marketing';
+  urgency: 'high' | 'medium' | 'low';
+  actionLabel: string;
+  resolved: boolean;
+}
+
+export interface ActivityFeedItem {
+  id: string;
+  type: 'purchase' | 'checkin' | 'refund' | 'campaign' | 'rfp' | 'session' | 'integration' | 'profile' | 'webhook';
+  title: string;
+  description: string;
+  timestamp: string;
+  actor: string;
+}
+
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'attendee' | 'organizer' | 'admin';
+  avatar?: string;
+  provider?: 'password' | 'google' | 'apple' | 'magic_link';
+  organizationId?: string;
+}
+
