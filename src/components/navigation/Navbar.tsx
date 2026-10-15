@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, LogOut, Sun, Moon } from 'lucide-react';
+import { ChevronDown, LogOut, Sun, Moon, ShieldCheck } from 'lucide-react';
 import { AuthUser } from '../../types';
 
 interface NavbarProps {
@@ -50,10 +50,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
 
-        {/* Center: Navigation Links (Discover & Staff Scanner) */}
+        {/* Center: Navigation Links (Buyer: only Marketplace & Tickets; Organizer: Marketplace & Organizer; Admin: Super Admin) */}
         <nav className={`hidden lg:flex items-center gap-8 text-sm font-medium ${
           isDark ? 'text-white/70' : 'text-black/70'
         }`}>
+          {/* Marketplace Discover link */}
           <button
             onClick={() => setActiveView('marketplace')}
             className={`cursor-pointer transition-colors whitespace-nowrap ${
@@ -65,16 +66,34 @@ export const Navbar: React.FC<NavbarProps> = ({
             Discover
           </button>
 
-          <button
-            onClick={() => setActiveView('scanner')}
-            className={`cursor-pointer transition-colors whitespace-nowrap ${
-              activeView === 'scanner' 
-                ? (isDark ? 'text-white font-bold' : 'text-black font-bold') 
-                : (isDark ? 'hover:text-white' : 'hover:text-black')
-            }`}
-          >
-            Guest Ticket Scanner
-          </button>
+          {/* Organizer link: only for organizer and admin */}
+          {(currentUser?.role === 'organizer' || currentUser?.role === 'admin') && (
+            <button
+              onClick={() => setActiveView('organizer')}
+              className={`cursor-pointer transition-colors whitespace-nowrap ${
+                activeView === 'organizer' 
+                  ? (isDark ? 'text-white font-bold' : 'text-black font-bold') 
+                  : (isDark ? 'hover:text-white' : 'hover:text-black')
+              }`}
+            >
+              Organizer Portal
+            </button>
+          )}
+
+          {/* Admin link: directly connected to Super Admin */}
+          {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => setActiveView('admin')}
+              className={`cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                activeView === 'admin' 
+                  ? 'text-amber-400 font-bold' 
+                  : 'text-amber-400/80 hover:text-amber-300'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>Super Admin Platform</span>
+            </button>
+          )}
         </nav>
 
         {/* Right Side: Theme Toggle + Auth Links (Sign up / Log in on the RIGHT) + Authenticated Tickets & Profile */}
@@ -100,10 +119,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Condition: If user is logged in / registered, show My Tickets & Profile */}
+          {/* Condition: If user is logged in / registered, show Role-specific buttons, My Tickets & Profile */}
           {currentUser ? (
             <>
-              {/* Ticket Wallet Button - ONLY visible after login/signup */}
+              {/* Admin Quick Action Button: Direct link to Super Admin Platform */}
+              {currentUser.role === 'admin' && (
+                <button
+                  onClick={() => setActiveView('admin')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer shadow-xs ${
+                    activeView === 'admin'
+                      ? 'bg-amber-500 text-black shadow-amber-500/20'
+                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30'
+                  }`}
+                  title="Connected to Super Admin Platform"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Super Admin</span>
+                </button>
+              )}
+
+              {/* Organizer Quick Action Button */}
+              {currentUser.role === 'organizer' && (
+                <button
+                  onClick={() => setActiveView('organizer')}
+                  className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-xs border ${
+                    activeView === 'organizer'
+                      ? (isDark ? 'bg-white text-black font-bold' : 'bg-black text-white font-bold')
+                      : (isDark ? 'bg-[#121214] hover:bg-[#1f1f24] text-white border-white/10' : 'bg-neutral-100 hover:bg-neutral-200 text-black border-black/10')
+                  }`}
+                  title="Organizer Portal"
+                >
+                  <span>Organizer Portal</span>
+                </button>
+              )}
+
+              {/* Ticket Wallet Button - Visible to all logged-in roles (Buyer, Organizer, Admin) */}
               <button
                 onClick={onOpenWallet}
                 className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-xs relative ${
@@ -123,7 +173,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </button>
 
-              {/* Profile Toggle Menu - ONLY visible after login/signup */}
+              {/* Profile Toggle Menu */}
               <div className="relative">
                 <button
                   onClick={() => setShowUserDropdown(!showUserDropdown)}
@@ -134,7 +184,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }`}
                 >
                   <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] ${
-                    isDark ? 'bg-white text-black' : 'bg-black text-white'
+                    currentUser.role === 'admin'
+                      ? 'bg-amber-500 text-black font-mono'
+                      : isDark ? 'bg-white text-black' : 'bg-black text-white'
                   }`}>
                     {currentUser.name.charAt(0).toUpperCase()}
                   </div>
@@ -143,30 +195,53 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
 
                 {showUserDropdown && (
-                  <div className={`absolute top-full right-0 mt-2 w-52 rounded-xl shadow-2xl py-2 z-50 ${
+                  <div className={`absolute top-full right-0 mt-2 w-56 rounded-xl shadow-2xl py-2 z-50 border ${
                     isDark
-                      ? 'bg-black text-white'
-                      : 'bg-white text-black'
+                      ? 'bg-[#0E121B] text-white border-white/10'
+                      : 'bg-white text-black border-black/10'
                   }`}>
                     <div className={`px-4 py-2 text-xs mb-1 border-b ${
                       isDark ? 'text-white/60 border-white/10' : 'text-black/60 border-black/10'
                     }`}>
                       <strong className={`block truncate ${isDark ? 'text-white' : 'text-black'}`}>{currentUser.name}</strong>
-                      <span className="text-[10px] capitalize font-mono opacity-80">{currentUser.role} Account</span>
+                      <span className="text-[10px] capitalize font-mono opacity-80 flex items-center gap-1.5 mt-0.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          currentUser.role === 'admin' ? 'bg-amber-400' : currentUser.role === 'organizer' ? 'bg-purple-400' : 'bg-blue-400'
+                        }`} />
+                        {currentUser.role === 'attendee' ? 'Buyer (Attendee)' : `${currentUser.role} Account`}
+                      </span>
                     </div>
 
-                    {/* Organizer Portal inside Profile Drop button */}
-                    <button
-                      onClick={() => { setActiveView('organizer'); setShowUserDropdown(false); }}
-                      className={`w-full text-left px-4 py-2.5 text-xs font-semibold cursor-pointer flex items-center justify-between ${
-                        isDark ? 'text-white hover:bg-neutral-900' : 'text-black hover:bg-neutral-100'
-                      }`}
-                    >
-                      <span>Organizer Portal</span>
-                      <span className="text-[10px] font-mono opacity-60">Manage</span>
-                    </button>
+                    {/* Admin only: Super Admin Platform */}
+                    {currentUser.role === 'admin' && (
+                      <button
+                        onClick={() => { setActiveView('admin'); setShowUserDropdown(false); }}
+                        className={`w-full text-left px-4 py-2 text-xs font-bold cursor-pointer flex items-center justify-between text-amber-400 ${
+                          isDark ? 'hover:bg-neutral-900' : 'hover:bg-neutral-100'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Super Admin</span>
+                        </span>
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Root</span>
+                      </button>
+                    )}
 
-                    {/* My Tickets */}
+                    {/* Organizer & Admin: Organizer Portal */}
+                    {(currentUser.role === 'organizer' || currentUser.role === 'admin') && (
+                      <button
+                        onClick={() => { setActiveView('organizer'); setShowUserDropdown(false); }}
+                        className={`w-full text-left px-4 py-2 text-xs font-semibold cursor-pointer flex items-center justify-between ${
+                          isDark ? 'text-white hover:bg-neutral-900' : 'text-black hover:bg-neutral-100'
+                        }`}
+                      >
+                        <span>Organizer Portal</span>
+                        <span className="text-[10px] font-mono opacity-60">Manage</span>
+                      </button>
+                    )}
+
+                    {/* My Tickets - Accessible to all (Buyer, Organizer, Admin) */}
                     <button
                       onClick={() => { onOpenWallet(); setShowUserDropdown(false); }}
                       className={`w-full text-left px-4 py-2 text-xs cursor-pointer flex items-center justify-between ${
@@ -181,6 +256,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                           {ticketCount}
                         </span>
                       )}
+                    </button>
+
+                    {/* Marketplace Discover link */}
+                    <button
+                      onClick={() => { setActiveView('marketplace'); setShowUserDropdown(false); }}
+                      className={`w-full text-left px-4 py-2 text-xs cursor-pointer flex items-center justify-between ${
+                        isDark ? 'text-white hover:bg-neutral-900' : 'text-black hover:bg-neutral-100'
+                      }`}
+                    >
+                      <span>Discover Marketplace</span>
                     </button>
 
                     <div className={`my-1 border-t ${isDark ? 'border-white/10' : 'border-black/10'}`} />
@@ -242,10 +327,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               <ChevronDown className="w-4 h-4" />
             </button>
             {showRoleDropdown && (
-              <div className={`absolute top-full right-0 mt-2 w-52 rounded-xl shadow-2xl py-2 z-50 ${
+              <div className={`absolute top-full right-0 mt-2 w-52 rounded-xl shadow-2xl py-2 z-50 border ${
                 isDark
-                  ? 'bg-black text-white'
-                  : 'bg-white text-black'
+                  ? 'bg-[#0E121B] text-white border-white/10'
+                  : 'bg-white text-black border-black/10'
               }`}>
                 <button
                   onClick={() => { setActiveView('marketplace'); setShowRoleDropdown(false); }}
@@ -255,14 +340,50 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   Discover Marketplace
                 </button>
-                <button
-                  onClick={() => { setActiveView('scanner'); setShowRoleDropdown(false); }}
-                  className={`w-full text-left px-4 py-2 text-xs ${
-                    isDark ? 'text-white hover:bg-neutral-900' : 'text-black hover:bg-neutral-100'
-                  }`}
-                >
-                  Guest Ticket Scanner
-                </button>
+
+                {currentUser && (
+                  <button
+                    onClick={() => { onOpenWallet(); setShowRoleDropdown(false); }}
+                    className={`w-full text-left px-4 py-2 text-xs flex items-center justify-between ${
+                      isDark ? 'text-white hover:bg-neutral-900' : 'text-black hover:bg-neutral-100'
+                    }`}
+                  >
+                    <span>My Tickets</span>
+                    {ticketCount > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500 text-black">
+                        {ticketCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                {/* Organizer Portal: visible to Organizer & Admin */}
+                {(currentUser?.role === 'organizer' || currentUser?.role === 'admin') && (
+                  <button
+                    onClick={() => { setActiveView('organizer'); setShowRoleDropdown(false); }}
+                    className={`w-full text-left px-4 py-2 text-xs ${
+                      isDark ? 'text-white hover:bg-neutral-900' : 'text-black hover:bg-neutral-100'
+                    }`}
+                  >
+                    Organizer Portal
+                  </button>
+                )}
+
+                {/* Admin: Super Admin Platform */}
+                {currentUser?.role === 'admin' && (
+                  <button
+                    onClick={() => { setActiveView('admin'); setShowRoleDropdown(false); }}
+                    className={`w-full text-left px-4 py-2 text-xs flex items-center justify-between text-amber-400 ${
+                      isDark ? 'hover:bg-neutral-900' : 'hover:bg-neutral-100'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Super Admin</span>
+                    </span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">Root</span>
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -9,7 +9,7 @@ import { TicketWalletPage } from './components/wallet/TicketWalletPage';
 import { AuthPage } from './components/auth/AuthPage';
 import { TicketScannerModal } from './components/scanner/TicketScannerModal';
 import { OrganizerPortal } from './components/organizer/OrganizerPortal';
-import { AdminConsole } from './components/admin/AdminConsole';
+import { SuperAdminPlatform } from './components/admin/SuperAdminPlatform';
 import { LegalPage } from './components/navigation/LegalPage';
 import { store } from './lib/store';
 import { Event, Ticket, AuthUser } from './types';
@@ -175,6 +175,22 @@ export default function App() {
       }
     }
   }, [events]);
+
+  // Strict Role Route Guards:
+  // - Buyer can only see tickets and Marketplace
+  // - Organizer can see tickets and Organizer portal
+  // - Admin must be connected to the Super Admin
+  useEffect(() => {
+    if (currentUser?.role === 'attendee') {
+      if (activeView === 'organizer' || activeView === 'admin' || activeView === 'scanner') {
+        setActiveView('marketplace');
+      }
+    } else if (currentUser?.role === 'organizer') {
+      if (activeView === 'admin') {
+        setActiveView('organizer');
+      }
+    }
+  }, [currentUser, activeView]);
 
   const handleCurrencyChange = (curr: string) => {
     setCurrency(curr);
@@ -343,10 +359,21 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 3: ADMIN CONSOLE */}
+        {/* VIEW 3: SUPER ADMIN CONTROL PLATFORM */}
         {activeView === 'admin' && (
-          <AdminConsole
-            onBackToMarketplace={() => setActiveView('marketplace')}
+          <SuperAdminPlatform
+            onBackToMarketplace={() => {
+              setActiveView('marketplace');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenOrganizerPortal={() => {
+              setActiveView('organizer');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenGuestScanner={() => {
+              setActiveView('scanner');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
             theme={isDark ? 'dark' : 'light'}
           />
         )}
@@ -645,18 +672,45 @@ export default function App() {
                   </div>
                   
                   <div className="flex flex-wrap items-center gap-4 shrink-0">
-                    <button
-                      onClick={() => {
-                        setActiveView('organizer');
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }}
-                      className={`px-6 py-3.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-2.5 shadow-xl ${
-                        isDark ? 'bg-white text-black hover:bg-neutral-200' : 'bg-black text-white hover:bg-neutral-800'
-                      }`}
-                    >
-                      <span>Open Organizer Studio</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
+                    {currentUser?.role === 'attendee' ? (
+                      <button
+                        onClick={() => {
+                          setActiveView('wallet');
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className={`px-6 py-3.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-2.5 shadow-xl ${
+                          isDark ? 'bg-white text-black hover:bg-neutral-200' : 'bg-black text-white hover:bg-neutral-800'
+                        }`}
+                      >
+                        <span>View My Tickets</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    ) : currentUser?.role === 'admin' ? (
+                      <button
+                        onClick={() => {
+                          setActiveView('admin');
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="px-6 py-3.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-2.5 shadow-xl bg-amber-500 text-black hover:bg-amber-400"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-black" />
+                        <span>Super Admin Platform</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setActiveView('organizer');
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className={`px-6 py-3.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-2.5 shadow-xl ${
+                          isDark ? 'bg-white text-black hover:bg-neutral-200' : 'bg-black text-white hover:bg-neutral-800'
+                        }`}
+                      >
+                        <span>Open Organizer Studio</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1292,18 +1346,45 @@ export default function App() {
 
                     {/* Quick Action Buttons */}
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                      <button
-                        onClick={() => {
-                          setActiveView('organizer');
-                          window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                        className={`px-8 py-4 text-sm font-black tracking-wide rounded-xl transition-all cursor-pointer shadow-xl flex items-center justify-center gap-3 ${
-                          isDark ? 'bg-white hover:bg-neutral-200 text-black' : 'bg-black hover:bg-neutral-800 text-white'
-                        }`}
-                      >
-                        <span>Create Your Event</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </button>
+                      {currentUser?.role === 'attendee' ? (
+                        <button
+                          onClick={() => {
+                            setActiveView('wallet');
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className={`px-8 py-4 text-sm font-black tracking-wide rounded-xl transition-all cursor-pointer shadow-xl flex items-center justify-center gap-3 ${
+                            isDark ? 'bg-white hover:bg-neutral-200 text-black' : 'bg-black hover:bg-neutral-800 text-white'
+                          }`}
+                        >
+                          <span>View My Tickets</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      ) : currentUser?.role === 'admin' ? (
+                        <button
+                          onClick={() => {
+                            setActiveView('admin');
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="px-8 py-4 text-sm font-black tracking-wide rounded-xl transition-all cursor-pointer shadow-xl flex items-center justify-center gap-3 bg-amber-500 hover:bg-amber-400 text-black"
+                        >
+                          <ShieldCheck className="w-4 h-4 text-black" />
+                          <span>Super Admin Platform</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setActiveView('organizer');
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className={`px-8 py-4 text-sm font-black tracking-wide rounded-xl transition-all cursor-pointer shadow-xl flex items-center justify-center gap-3 ${
+                            isDark ? 'bg-white hover:bg-neutral-200 text-black' : 'bg-black hover:bg-neutral-800 text-white'
+                          }`}
+                        >
+                          <span>Create Your Event</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           const el = document.getElementById('events-catalog');
@@ -1640,7 +1721,9 @@ export default function App() {
             }}
             onAuthenticated={(user) => {
               setCurrentUser(user);
-              if (user.role === 'organizer') {
+              if (user.role === 'admin') {
+                setActiveView('admin');
+              } else if (user.role === 'organizer') {
                 setActiveView('organizer');
               } else {
                 setActiveView('marketplace');
@@ -1666,14 +1749,27 @@ export default function App() {
       </main>
 
       {/* Footer with theme support and legal/portal navigation */}
-      {activeView !== 'organizer' && activeView !== 'scanner' && (
+      {activeView !== 'organizer' && activeView !== 'scanner' && activeView !== 'admin' && (
         <Footer 
           theme={theme} 
+          currentUser={currentUser}
+          onOpenWallet={() => {
+            setActiveView('wallet');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
           onNavigateLegal={(legalPage) => {
             setActiveView(legalPage);
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
           onNavigatePortal={(portalView) => {
+            if (currentUser?.role === 'attendee' && (portalView === 'organizer' || portalView === 'scanner' || portalView === 'admin')) {
+              setActiveView('marketplace');
+              return;
+            }
+            if (currentUser?.role === 'organizer' && portalView === 'admin') {
+              setActiveView('organizer');
+              return;
+            }
             setActiveView(portalView);
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}

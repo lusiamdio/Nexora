@@ -406,9 +406,150 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  role: 'attendee' | 'organizer' | 'admin';
+  role: 'attendee' | 'organizer' | 'admin' | 'support_lead' | 'gate_supervisor';
   avatar?: string;
   provider?: 'password' | 'google' | 'apple' | 'magic_link';
   organizationId?: string;
+  status?: 'active' | 'suspended' | 'pending_verification';
+  phone?: string;
+  country?: string;
+  city?: string;
+  registeredAt?: string;
+  lastLoginAt?: string;
+  twoFactorEnabled?: boolean;
+  riskScore?: number;
+  suspensionReason?: string;
+  notes?: string;
+}
+
+export interface PlatformCircuitBreakers {
+  maintenanceMode: boolean;
+  payoutsKillSwitch: boolean;
+  checkoutFreeze: boolean;
+  strictKycEnforced: boolean;
+  webhookIdempotencyStrict: boolean;
+  debugTelemetry: boolean;
+}
+
+export interface PlatformSettings {
+  platformCommissionRate: number; // e.g. 0.035 (3.5%)
+  fixedBookingFeeMinor: number; // e.g. 300 ($0.30 in minor)
+  treasurySettlementReserveRate: number; // e.g. 0.05 (5% dispute reserve)
+  disputeWindowDays: number;
+  emergencyHotline: string;
+  treasuryClearingAccount: string;
+  enforceDoubleEntryCheck: boolean;
+  defaultPayoutSchedule: 'instant' | 'daily' | 'weekly' | 'post_event';
+}
+
+export interface SuperAdminAuditEntry {
+  id: string;
+  action: string;
+  category: 'event_moderation' | 'kyb_approval' | 'payout_settlement' | 'refund_override' | 'circuit_breaker' | 'config_change';
+  target: string;
+  actor: string;
+  details: string;
+  timestamp: string;
+}
+
+// =========================================================================
+// Third-Party Hybrid Integration Architecture Types
+// =========================================================================
+
+export type IntegrationPillar = 
+  | 'payments'
+  | 'communication'
+  | 'maps_venues'
+  | 'virtual_events'
+  | 'marketing_crm'
+  | 'ai_automation';
+
+export type IntegrationPriority = 'P1' | 'P2' | 'P3';
+
+export interface IntegrationConnection {
+  id: string;
+  name: string;
+  provider: string;
+  pillar: IntegrationPillar;
+  pillarLabel: string;
+  priority: IntegrationPriority;
+  priorityGuide: string;
+  status: 'connected' | 'disconnected' | 'degraded' | 'sandbox' | 'pending_auth';
+  badge: string;
+  description: string;
+  supportedRegions: string[];
+  authType: 'oauth2' | 'api_key' | 'webhook_hmac' | 'jwt' | 'mcp_token';
+  webhookSecretConfigured: boolean;
+  vaultSecretRef: string;
+  latencyMs: number;
+  uptime: string;
+  lastPingStatus: 'healthy' | 'warning' | 'error';
+  lastSyncedAt: string;
+  syncedRecordsCount: number;
+  features: Record<string, boolean>;
+  idempotencyStrict: boolean;
+  failedQueueCount: number;
+  docsUrl: string;
+  endpointUrl?: string;
+}
+
+export type IntegrationFlowId = 
+  | 'ticket_purchase'
+  | 'event_creation'
+  | 'ticket_checkin'
+  | 'refund_cancellation'
+  | 'marketing_engagement';
+
+export interface IntegrationFlowStep {
+  stepNumber: number;
+  title: string;
+  subsystem: 'Nexora Platform' | 'API Gateway' | 'Integration Layer' | 'External Provider' | 'Event Bus' | 'Core Database';
+  providerName?: string;
+  action: string;
+  payloadSnippet: string;
+  idempotencyKey?: string;
+  signatureVerified?: boolean;
+  status: 'completed' | 'active' | 'pending';
+  ruleEnforced: string;
+}
+
+export interface NotificationJobRecord {
+  id: string;
+  orderId?: string;
+  ticketId?: string;
+  recipient: string;
+  channel: 'email_ses' | 'sms_twilio' | 'whatsapp_meta' | 'fcm_push';
+  channelLabel: string;
+  template: 'ticket_confirmation' | 'gate_reminder' | 'refund_notice' | 'security_alert' | 'vip_arrival';
+  status: 'delivered' | 'queued' | 'retrying' | 'failed' | 'dead_letter';
+  attempts: number;
+  maxAttempts: number;
+  lastAttemptAt: string;
+  providerResponse: string;
+  errorDetails?: string;
+}
+
+export interface DeadLetterQueueItem {
+  id: string;
+  eventId: string;
+  provider: string;
+  eventType: string;
+  payload: string;
+  signatureHeader: string;
+  receivedAt: string;
+  failedAttempts: number;
+  lastError: string;
+  status: 'quarantined' | 'replaying' | 'resolved' | 'dismissed';
+  resolvedAt?: string;
+}
+
+export interface NexoraCoreEntity {
+  name: 'events' | 'ticket_types' | 'orders' | 'payments' | 'tickets' | 'attendees' | 'integration_connections' | 'webhook_events' | 'notification_jobs' | 'audit_logs';
+  label: string;
+  description: string;
+  primaryKey: string;
+  fields: Array<{ name: string; type: string; nullable: boolean; description: string }>;
+  sampleRecordCount: number;
+  lastMutatedAt: string;
 }
 

@@ -12,7 +12,9 @@ import {
   User, 
   Calendar,
   Check,
-  Building2
+  Building2,
+  Zap,
+  Ticket as TicketIcon
 } from 'lucide-react';
 import { AuthUser } from '../../types';
 import { store } from '../../lib/store';
@@ -245,40 +247,81 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             </div>
 
             {/* Fast Demo One-Click Sign In (For Test Evaluation) */}
-            <div className={`p-4 rounded-2xl space-y-2.5 ${
-              isDark ? 'bg-black/60' : 'bg-white'
+            <div className={`p-4 rounded-2xl space-y-3 border transition-all ${
+              isDark ? 'bg-black/60 border-white/10' : 'bg-white border-black/10 shadow-xs'
             }`}>
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="font-bold opacity-70">Instant Test Sign In</span>
-                <span className="opacity-50 text-[10px]">No credentials required</span>
+                <span className="font-bold flex items-center gap-1.5 text-amber-400">
+                  <Zap className="w-3.5 h-3.5" />
+                  Instant Test Sign In
+                </span>
+                <span className="opacity-50 text-[10px]">1-Click Role Sandbox</span>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* 1. Buyer: can only see tickets and Marketplace */}
                 <button
                   type="button"
                   onClick={() => handleFastLogin('attendee')}
-                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-colors cursor-pointer text-center ${
-                    isDark ? 'bg-[#18181C] hover:bg-[#25252C] text-white' : 'bg-neutral-100 hover:bg-neutral-200 text-black'
+                  className={`p-3 rounded-xl text-left transition-all cursor-pointer border flex flex-col justify-between group ${
+                    isDark 
+                      ? 'bg-[#141418] hover:bg-[#1c1c22] border-white/10 hover:border-white/30 text-white' 
+                      : 'bg-neutral-50 hover:bg-neutral-100 border-black/10 hover:border-black/30 text-black'
                   }`}
                 >
-                  Buyer
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs group-hover:text-amber-400 transition-colors">Buyer</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
+                      Attendee
+                    </span>
+                  </div>
+                  <div className="text-[10px] opacity-70 font-mono leading-tight">
+                    Can only see <strong>tickets</strong> & <strong>Marketplace</strong>
+                  </div>
                 </button>
+
+                {/* 2. Organizer: can see tickets and Organizer portal */}
                 <button
                   type="button"
                   onClick={() => handleFastLogin('organizer')}
-                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-colors cursor-pointer text-center ${
-                    isDark ? 'bg-[#18181C] hover:bg-[#25252C] text-white' : 'bg-neutral-100 hover:bg-neutral-200 text-black'
+                  className={`p-3 rounded-xl text-left transition-all cursor-pointer border flex flex-col justify-between group ${
+                    isDark 
+                      ? 'bg-[#141418] hover:bg-[#1c1c22] border-white/10 hover:border-purple-500/40 text-white' 
+                      : 'bg-neutral-50 hover:bg-neutral-100 border-black/10 hover:border-purple-500/40 text-black'
                   }`}
                 >
-                  Organizer
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs group-hover:text-purple-400 transition-colors">Organizer</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-bold">
+                      Portal
+                    </span>
+                  </div>
+                  <div className="text-[10px] opacity-70 font-mono leading-tight">
+                    Can see <strong>tickets</strong> & <strong>Organizer portal</strong>
+                  </div>
                 </button>
+
+                {/* 3. Admin: connected directly to Super Admin */}
                 <button
                   type="button"
                   onClick={() => handleFastLogin('admin')}
-                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-colors cursor-pointer text-center ${
-                    isDark ? 'bg-[#18181C] hover:bg-[#25252C] text-white' : 'bg-neutral-100 hover:bg-neutral-200 text-black'
+                  className={`p-3 rounded-xl text-left transition-all cursor-pointer border flex flex-col justify-between group ${
+                    isDark 
+                      ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 hover:border-amber-400 text-amber-300' 
+                      : 'bg-amber-50 hover:bg-amber-100 border-amber-300 hover:border-amber-400 text-amber-950'
                   }`}
                 >
-                  Admin
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs flex items-center gap-1 group-hover:text-amber-300 transition-colors">
+                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                      Admin
+                    </span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
+                      Root
+                    </span>
+                  </div>
+                  <div className="text-[10px] opacity-80 font-mono leading-tight">
+                    Connected to the <strong>Super Admin</strong> platform
+                  </div>
                 </button>
               </div>
             </div>

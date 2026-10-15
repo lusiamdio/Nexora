@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, ShieldCheck, Lock } from 'lucide-react';
+import { AuthUser } from '../../types';
 
 interface FooterProps {
   theme?: 'light' | 'dark';
   onNavigateLegal?: (page: 'terms' | 'privacy' | 'security') => void;
-  onNavigatePortal?: (view: 'marketplace' | 'organizer' | 'scanner') => void;
+  onNavigatePortal?: (view: 'marketplace' | 'organizer' | 'scanner' | 'admin') => void;
+  currentUser?: AuthUser | null;
+  onOpenWallet?: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({ 
   theme = 'dark',
   onNavigateLegal,
-  onNavigatePortal
+  onNavigatePortal,
+  currentUser,
+  onOpenWallet
 }) => {
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
@@ -71,7 +76,7 @@ export const Footer: React.FC<FooterProps> = ({
             </ul>
           </div>
 
-          {/* Platform Products */}
+          {/* Platform Products (Role-Filtered) */}
           <div className="space-y-3">
             <h4 className={`text-xs font-bold uppercase tracking-wider font-mono ${
               isDark ? 'text-white' : 'text-black'
@@ -79,6 +84,7 @@ export const Footer: React.FC<FooterProps> = ({
               Platform
             </h4>
             <ul className="space-y-2 text-sm">
+              {/* Discover Marketplace: Available to all */}
               <li>
                 <button 
                   onClick={() => onNavigatePortal && onNavigatePortal('marketplace')}
@@ -87,14 +93,44 @@ export const Footer: React.FC<FooterProps> = ({
                   Discover Marketplace
                 </button>
               </li>
-              <li>
-                <button 
-                  onClick={() => onNavigatePortal && onNavigatePortal('scanner')}
-                  className={`transition-colors cursor-pointer text-left ${isDark ? 'hover:text-white' : 'hover:text-black'}`}
-                >
-                  Mobile Gate Scanner
-                </button>
-              </li>
+
+              {/* My Tickets: Available to all logged-in users (Buyer, Organizer, Admin) */}
+              {currentUser && onOpenWallet && (
+                <li>
+                  <button 
+                    onClick={onOpenWallet}
+                    className={`transition-colors cursor-pointer text-left ${isDark ? 'hover:text-white' : 'hover:text-black'}`}
+                  >
+                    My Tickets
+                  </button>
+                </li>
+              )}
+
+              {/* Organizer Portal: Visible to Organizers & Admins (NEVER to Buyer) */}
+              {(currentUser?.role === 'organizer' || currentUser?.role === 'admin') && (
+                <li>
+                  <button 
+                    onClick={() => onNavigatePortal && onNavigatePortal('organizer')}
+                    className={`transition-colors cursor-pointer text-left ${isDark ? 'hover:text-white' : 'hover:text-black'}`}
+                  >
+                    Organizer Portal
+                  </button>
+                </li>
+              )}
+
+              {/* Guest Ticket Scanner: Visible only to Admins (NEVER to Buyer) */}
+              {currentUser?.role === 'admin' && (
+                <li>
+                  <button 
+                    onClick={() => onNavigatePortal && onNavigatePortal('scanner')}
+                    className={`transition-colors cursor-pointer text-left ${isDark ? 'hover:text-white' : 'hover:text-black'}`}
+                  >
+                    Guest Ticket Scanner
+                  </button>
+                </li>
+              )}
+
+              {/* Security Architecture: Available to all */}
               <li>
                 <button 
                   onClick={() => onNavigateLegal && onNavigateLegal('security')}
@@ -103,6 +139,19 @@ export const Footer: React.FC<FooterProps> = ({
                   Security Architecture
                 </button>
               </li>
+
+              {/* Super Admin Platform: ONLY for Admin */}
+              {currentUser?.role === 'admin' && (
+                <li className="pt-1">
+                  <button 
+                    onClick={() => onNavigatePortal && onNavigatePortal('admin')}
+                    className="transition-colors cursor-pointer text-left flex items-center gap-1.5 text-amber-400 hover:text-amber-300 font-medium"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Super Admin Platform</span>
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -157,7 +206,19 @@ export const Footer: React.FC<FooterProps> = ({
           <div>
             © {new Date().getFullYear()} NEXORA. All rights reserved.
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+            <button
+              onClick={() => onNavigatePortal && onNavigatePortal('admin')}
+              className={`cursor-pointer transition-all flex items-center gap-1.5 px-3 py-1 rounded-md border font-mono text-[11px] font-semibold ${
+                isDark 
+                  ? 'border-amber-500/30 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 hover:border-amber-500/60 shadow-xs' 
+                  : 'border-amber-600/30 text-amber-800 bg-amber-100/60 hover:bg-amber-100 hover:border-amber-600/60 shadow-xs'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+              <span>Super Admin Control</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+            </button>
             <button
               onClick={() => onNavigateLegal && onNavigateLegal('terms')}
               className={`cursor-pointer transition-colors ${

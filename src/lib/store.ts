@@ -18,7 +18,10 @@ import {
   AuthUser,
   ThirdPartyIntegration,
   CustomWebhookEndpoint,
-  WebhookDeliveryLog
+  WebhookDeliveryLog,
+  PlatformCircuitBreakers,
+  PlatformSettings,
+  SuperAdminAuditEntry
 } from '../types';
 
 import heroFestivalImg from '../assets/images/hero_afro_festival_1791591623547.jpg';
@@ -1230,6 +1233,583 @@ const INITIAL_TEAM_MEMBERS: TeamMember[] = [
   { id: 'tm-3', organizationId: 'org-cape-vibes', name: 'Lerato Pillay', email: 'lerato@capetownvibes.co.za', role: 'Finance Manager', invitedAt: '2026-02-01T11:00:00Z', status: 'active' },
 ];
 
+export const INITIAL_PLATFORM_USERS: AuthUser[] = [
+  {
+    id: 'usr-nomvula-dlamini',
+    name: 'Nomvula Dlamini',
+    email: 'nomvula.dlamini@example.com',
+    role: 'attendee',
+    status: 'active',
+    phone: '+27 82 491 0293',
+    country: 'ZA',
+    city: 'Cape Town',
+    provider: 'google',
+    registeredAt: '2026-02-10T14:20:00Z',
+    lastLoginAt: '2026-10-14T08:15:00Z',
+    twoFactorEnabled: true,
+    riskScore: 8,
+    notes: 'Verified VIP festival patron. High lifetime value buyer with verified mobile and Google OAuth credentials.',
+  },
+  {
+    id: 'usr-thabo-mokoena',
+    name: 'Thabo Mokoena',
+    email: 'thabo@capetownvibes.co.za',
+    role: 'organizer',
+    status: 'active',
+    organizationId: 'org-cape-vibes',
+    phone: '+27 21 555 0192',
+    country: 'ZA',
+    city: 'Cape Town',
+    provider: 'password',
+    registeredAt: '2026-01-15T09:00:00Z',
+    lastLoginAt: '2026-10-14T11:45:00Z',
+    twoFactorEnabled: true,
+    riskScore: 12,
+    notes: 'Authorized executive for Cape Town Entertainment Group (Pty) Ltd. KYB certified with verified FNB business cheque account.',
+  },
+  {
+    id: 'usr-aisha-kamau',
+    name: 'Aisha Kamau',
+    email: 'connect@africatechsummit.io',
+    role: 'organizer',
+    status: 'active',
+    organizationId: 'org-tech-africa',
+    phone: '+254 700 812 901',
+    country: 'KE',
+    city: 'Nairobi',
+    provider: 'google',
+    registeredAt: '2026-01-20T10:00:00Z',
+    lastLoginAt: '2026-10-13T16:20:00Z',
+    twoFactorEnabled: true,
+    riskScore: 6,
+    notes: 'Silicon Savannah conference director. Regular high-volume disbursements via Equity Bank Kenya & M-Pesa STK.',
+  },
+  {
+    id: 'usr-chidi-okafor',
+    name: 'Chidi Okafor',
+    email: 'chidi.okafor@lagostechhub.ng',
+    role: 'attendee',
+    status: 'active',
+    phone: '+234 803 291 8402',
+    country: 'NG',
+    city: 'Lagos',
+    provider: 'magic_link',
+    registeredAt: '2026-03-05T12:00:00Z',
+    lastLoginAt: '2026-10-12T19:30:00Z',
+    twoFactorEnabled: false,
+    riskScore: 18,
+    notes: 'Lagos tech ecosystem delegate. Frequent buyer for gastronomy exhibitions and summits across West Africa.',
+  },
+  {
+    id: 'usr-kevin-odhiambo',
+    name: 'Kevin Odhiambo',
+    email: 'k.odhiambo@gatesecure.co.ke',
+    role: 'gate_supervisor',
+    status: 'active',
+    phone: '+254 722 401 928',
+    country: 'KE',
+    city: 'Nairobi',
+    provider: 'password',
+    registeredAt: '2026-02-28T08:30:00Z',
+    lastLoginAt: '2026-10-14T06:10:00Z',
+    twoFactorEnabled: true,
+    riskScore: 4,
+    notes: 'Field hardware access officer. Superintends Turnstile Alpha & Bravo turnstile devices at Sarit Expo Centre.',
+  },
+  {
+    id: 'usr-lerato-khumalo',
+    name: 'Lerato Khumalo',
+    email: 'lerato.k@nexora.africa',
+    role: 'support_lead',
+    status: 'active',
+    phone: '+27 11 902 4810',
+    country: 'ZA',
+    city: 'Johannesburg',
+    provider: 'google',
+    registeredAt: '2026-01-05T08:00:00Z',
+    lastLoginAt: '2026-10-14T12:00:00Z',
+    twoFactorEnabled: true,
+    riskScore: 2,
+    notes: 'Senior customer experience lead. Authorized for Tier-2 refunds, dispute reversals, and attendee triage.',
+  },
+  {
+    id: 'usr-tariq-benyoussef',
+    name: 'Tariq Ben-Youssef',
+    email: 'tariq.passback@darkproxy.net',
+    role: 'attendee',
+    status: 'suspended',
+    phone: '+27 76 892 1049',
+    country: 'ZA',
+    city: 'Durban',
+    provider: 'password',
+    registeredAt: '2026-08-14T23:12:00Z',
+    lastLoginAt: '2026-09-12T03:45:00Z',
+    twoFactorEnabled: false,
+    riskScore: 89,
+    suspensionReason: 'Card velocity abuse, VPN exit node clustering, and 3 chargeback disputes lodged with ABSA gateway.',
+    notes: 'Account suspended by automated fraud engine. 4 chargebacks initiated. Manual re-verification required.',
+  },
+  {
+    id: 'usr-kofi-mensah',
+    name: 'Kofi Mensah',
+    email: 'kofi.mensah@accraaccords.com',
+    role: 'attendee',
+    status: 'active',
+    phone: '+233 24 551 0928',
+    country: 'GH',
+    city: 'Accra',
+    provider: 'google',
+    registeredAt: '2026-04-18T15:20:00Z',
+    lastLoginAt: '2026-10-10T14:40:00Z',
+    twoFactorEnabled: true,
+    riskScore: 11,
+    notes: 'Cultural diplomat and arts promoter in Ghana. Regular attendee of bilateral creative symposiums.',
+  },
+  {
+    id: 'usr-marie-uwase',
+    name: 'Dr. Marie Claire Uwase',
+    email: 'director@kigalitechsummit.rw',
+    role: 'organizer',
+    status: 'active',
+    organizationId: 'org-kigali-innovate',
+    phone: '+250 788 392 104',
+    country: 'RW',
+    city: 'Kigali',
+    provider: 'magic_link',
+    registeredAt: '2026-03-22T09:15:00Z',
+    lastLoginAt: '2026-10-11T17:05:00Z',
+    twoFactorEnabled: true,
+    riskScore: 7,
+    notes: 'Rwanda Innovation Hub executive. Active MoMo Pay merchant settlement integration.',
+  },
+  {
+    id: 'usr-johannes-vanwyk',
+    name: 'Johannes Van Wyk',
+    email: 'johannes.vw@nexora.africa',
+    role: 'admin',
+    status: 'active',
+    phone: '+27 12 849 2019',
+    country: 'ZA',
+    city: 'Pretoria',
+    provider: 'password',
+    registeredAt: '2026-01-02T07:30:00Z',
+    lastLoginAt: '2026-10-14T12:28:00Z',
+    twoFactorEnabled: true,
+    riskScore: 1,
+    notes: 'Nexora Platform Operations Director with Root governance clearance and African central bank reporting privileges.',
+  },
+];
+
+export const INITIAL_SAMPLE_ORDERS: Order[] = [
+  {
+    id: 'ord-nomvula-1',
+    orderReference: 'NX-948210',
+    customerName: 'Nomvula Dlamini',
+    customerEmail: 'nomvula.dlamini@example.com',
+    customerPhone: '+27 82 491 0293',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    items: [
+      {
+        tierId: 'tier-ct-early',
+        tierName: 'General Admission — Phase 1',
+        quantity: 2,
+        unitPriceMinor: 35000,
+        totalPriceMinor: 70000,
+      }
+    ],
+    subtotalMinor: 70000,
+    feeMinor: 2450,
+    discountMinor: 0,
+    taxMinor: 0,
+    totalMinor: 72450,
+    currency: 'ZAR',
+    paymentStatus: 'succeeded',
+    paymentMethod: 'Credit Card (3D-Secure)',
+    paymentProvider: 'paystack',
+    transactionReference: 'PSTK_TXN_948102948',
+    createdAt: '2026-09-15T14:20:00Z',
+    expiresAt: '2026-09-15T14:35:00Z',
+  },
+  {
+    id: 'ord-nomvula-2',
+    orderReference: 'NX-481920',
+    customerName: 'Nomvula Dlamini',
+    customerEmail: 'nomvula.dlamini@example.com',
+    customerPhone: '+27 82 491 0293',
+    eventId: 'evt-joburg-art-biennale-2026',
+    eventTitle: 'Johannesburg Contemporary Art Biennale 2026',
+    items: [
+      {
+        tierId: 'tier-joburg-vip',
+        tierName: 'Patron Gala & Preview Pass',
+        quantity: 1,
+        unitPriceMinor: 45000,
+        totalPriceMinor: 45000,
+      }
+    ],
+    subtotalMinor: 45000,
+    feeMinor: 1575,
+    discountMinor: 0,
+    taxMinor: 0,
+    totalMinor: 46575,
+    currency: 'ZAR',
+    paymentStatus: 'succeeded',
+    paymentMethod: 'Instant EFT',
+    paymentProvider: 'ozow',
+    transactionReference: 'OZOW_REF_849201948',
+    createdAt: '2026-10-02T10:15:00Z',
+    expiresAt: '2026-10-02T10:30:00Z',
+  },
+  {
+    id: 'ord-chidi-1',
+    orderReference: 'NX-610294',
+    customerName: 'Chidi Okafor',
+    customerEmail: 'chidi.okafor@lagostechhub.ng',
+    customerPhone: '+234 803 291 8402',
+    eventId: 'evt-lagos-gastronomy-2026',
+    eventTitle: 'Eko International Gastronomy & Wine Showcase',
+    items: [
+      {
+        tierId: 'tier-lagos-tasting',
+        tierName: 'Chef Tasting Pavilion Pass',
+        quantity: 2,
+        unitPriceMinor: 2500000,
+        totalPriceMinor: 5000000,
+      }
+    ],
+    subtotalMinor: 5000000,
+    feeMinor: 175000,
+    discountMinor: 0,
+    taxMinor: 0,
+    totalMinor: 5175000,
+    currency: 'NGN',
+    paymentStatus: 'succeeded',
+    paymentMethod: 'NGN Direct Bank Transfer',
+    paymentProvider: 'flutterwave',
+    transactionReference: 'FLW_NGN_77491029',
+    createdAt: '2026-09-28T16:45:00Z',
+    expiresAt: '2026-09-28T17:00:00Z',
+  },
+  {
+    id: 'ord-kofi-1',
+    orderReference: 'NX-882019',
+    customerName: 'Kofi Mensah',
+    customerEmail: 'kofi.mensah@accraaccords.com',
+    customerPhone: '+233 24 551 0928',
+    eventId: 'evt-africa-tech-summit-2026',
+    eventTitle: 'Africa Tech Vanguard Summit 2026',
+    items: [
+      {
+        tierId: 'tier-ats-standard',
+        tierName: 'Standard Delegate Pass',
+        quantity: 1,
+        unitPriceMinor: 1200000,
+        totalPriceMinor: 1200000,
+      }
+    ],
+    subtotalMinor: 1200000,
+    feeMinor: 42000,
+    discountMinor: 0,
+    taxMinor: 0,
+    totalMinor: 1242000,
+    currency: 'KES',
+    paymentStatus: 'succeeded',
+    paymentMethod: 'M-Pesa STK Push Express',
+    paymentProvider: 'mpesa',
+    transactionReference: 'MPESA_WS_7491029',
+    createdAt: '2026-10-05T09:12:00Z',
+    expiresAt: '2026-10-05T09:27:00Z',
+  },
+  {
+    id: 'ord-tariq-1',
+    orderReference: 'NX-193821',
+    customerName: 'Tariq Ben-Youssef',
+    customerEmail: 'tariq.passback@darkproxy.net',
+    customerPhone: '+27 76 892 1049',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    items: [
+      {
+        tierId: 'tier-ct-vip',
+        tierName: 'VIP Terrace Deck',
+        quantity: 4,
+        unitPriceMinor: 85000,
+        totalPriceMinor: 340000,
+      }
+    ],
+    subtotalMinor: 340000,
+    feeMinor: 11900,
+    discountMinor: 0,
+    taxMinor: 0,
+    totalMinor: 351900,
+    currency: 'ZAR',
+    paymentStatus: 'refunded',
+    paymentMethod: 'Card Velocity Probe',
+    paymentProvider: 'paystack',
+    transactionReference: 'PSTK_DISP_66491028',
+    createdAt: '2026-09-12T03:40:00Z',
+    expiresAt: '2026-09-12T03:55:00Z',
+  },
+];
+
+export const INITIAL_SAMPLE_TICKETS: Ticket[] = [
+  {
+    id: 'tkt-nomvula-1',
+    ticketCode: 'NX-TKT-94821',
+    token: 'tok_nomvula_ctv_01',
+    orderId: 'ord-nomvula-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    eventDate: '2026-11-14T14:00:00Z',
+    eventVenue: 'Green Point Amphitheatre, Cape Town',
+    tierId: 'tier-ct-early',
+    tierName: 'General Admission — Phase 1',
+    attendeeName: 'Nomvula Dlamini',
+    attendeeEmail: 'nomvula.dlamini@example.com',
+    attendeePhone: '+27 82 491 0293',
+    priceMinor: 35000,
+    currency: 'ZAR',
+    status: 'valid',
+    qrPayload: JSON.stringify({
+      code: 'NX-TKT-94821',
+      eventId: 'evt-cape-town-vibes-2026',
+      token: 'tok_nomvula_ctv_01',
+      tier: 'General Admission — Phase 1',
+      attendee: 'Nomvula Dlamini',
+    }),
+  },
+  {
+    id: 'tkt-nomvula-2',
+    ticketCode: 'NX-TKT-94822',
+    token: 'tok_nomvula_ctv_02',
+    orderId: 'ord-nomvula-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    eventDate: '2026-11-14T14:00:00Z',
+    eventVenue: 'Green Point Amphitheatre, Cape Town',
+    tierId: 'tier-ct-early',
+    tierName: 'General Admission — Phase 1',
+    attendeeName: 'Nomvula Dlamini (Guest)',
+    attendeeEmail: 'nomvula.dlamini@example.com',
+    attendeePhone: '+27 82 491 0293',
+    priceMinor: 35000,
+    currency: 'ZAR',
+    status: 'valid',
+    qrPayload: JSON.stringify({
+      code: 'NX-TKT-94822',
+      eventId: 'evt-cape-town-vibes-2026',
+      token: 'tok_nomvula_ctv_02',
+      tier: 'General Admission — Phase 1',
+      attendee: 'Nomvula Dlamini (Guest)',
+    }),
+  },
+  {
+    id: 'tkt-nomvula-3',
+    ticketCode: 'NX-TKT-48192',
+    token: 'tok_nomvula_jb_01',
+    orderId: 'ord-nomvula-2',
+    eventId: 'evt-joburg-art-biennale-2026',
+    eventTitle: 'Johannesburg Contemporary Art Biennale 2026',
+    eventDate: '2026-10-24T18:00:00Z',
+    eventVenue: 'Turbine Hall, Newtown, Johannesburg',
+    tierId: 'tier-joburg-vip',
+    tierName: 'Patron Gala & Preview Pass',
+    attendeeName: 'Nomvula Dlamini',
+    attendeeEmail: 'nomvula.dlamini@example.com',
+    attendeePhone: '+27 82 491 0293',
+    priceMinor: 45000,
+    currency: 'ZAR',
+    status: 'valid',
+    qrPayload: JSON.stringify({
+      code: 'NX-TKT-48192',
+      eventId: 'evt-joburg-art-biennale-2026',
+      token: 'tok_nomvula_jb_01',
+      tier: 'Patron Gala & Preview Pass',
+      attendee: 'Nomvula Dlamini',
+    }),
+  },
+  {
+    id: 'tkt-chidi-1',
+    ticketCode: 'NX-TKT-61029',
+    token: 'tok_chidi_eko_01',
+    orderId: 'ord-chidi-1',
+    eventId: 'evt-lagos-gastronomy-2026',
+    eventTitle: 'Eko International Gastronomy & Wine Showcase',
+    eventDate: '2026-12-05T12:00:00Z',
+    eventVenue: 'Federal Palace Hotel & Casino, Victoria Island, Lagos',
+    tierId: 'tier-lagos-tasting',
+    tierName: 'Chef Tasting Pavilion Pass',
+    attendeeName: 'Chidi Okafor',
+    attendeeEmail: 'chidi.okafor@lagostechhub.ng',
+    attendeePhone: '+234 803 291 8402',
+    priceMinor: 2500000,
+    currency: 'NGN',
+    status: 'valid',
+    qrPayload: JSON.stringify({
+      code: 'NX-TKT-61029',
+      eventId: 'evt-lagos-gastronomy-2026',
+      token: 'tok_chidi_eko_01',
+      tier: 'Chef Tasting Pavilion Pass',
+      attendee: 'Chidi Okafor',
+    }),
+  },
+  {
+    id: 'tkt-kofi-1',
+    ticketCode: 'NX-TKT-88201',
+    token: 'tok_kofi_ats_01',
+    orderId: 'ord-kofi-1',
+    eventId: 'evt-africa-tech-summit-2026',
+    eventTitle: 'Africa Tech Vanguard Summit 2026',
+    eventDate: '2026-10-18T08:30:00Z',
+    eventVenue: 'Sarit Expo Centre, Westlands, Nairobi',
+    tierId: 'tier-ats-standard',
+    tierName: 'Standard Delegate Pass',
+    attendeeName: 'Kofi Mensah',
+    attendeeEmail: 'kofi.mensah@accraaccords.com',
+    attendeePhone: '+233 24 551 0928',
+    priceMinor: 1200000,
+    currency: 'KES',
+    status: 'valid',
+    qrPayload: JSON.stringify({
+      code: 'NX-TKT-88201',
+      eventId: 'evt-africa-tech-summit-2026',
+      token: 'tok_kofi_ats_01',
+      tier: 'Standard Delegate Pass',
+      attendee: 'Kofi Mensah',
+    }),
+  },
+  {
+    id: 'tkt-tariq-1',
+    ticketCode: 'NX-TKT-19382',
+    token: 'tok_tariq_revoked_01',
+    orderId: 'ord-tariq-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    eventDate: '2026-11-14T14:00:00Z',
+    eventVenue: 'Green Point Amphitheatre, Cape Town',
+    tierId: 'tier-ct-vip',
+    tierName: 'VIP Terrace Deck',
+    attendeeName: 'Tariq Ben-Youssef',
+    attendeeEmail: 'tariq.passback@darkproxy.net',
+    attendeePhone: '+27 76 892 1049',
+    priceMinor: 85000,
+    currency: 'ZAR',
+    status: 'refunded',
+    refundReason: 'Chargeback dispute filed via banking card network',
+    qrPayload: JSON.stringify({
+      code: 'NX-TKT-19382',
+      eventId: 'evt-cape-town-vibes-2026',
+      token: 'tok_tariq_revoked_01',
+      status: 'refunded',
+    }),
+  },
+];
+
+export const INITIAL_SAMPLE_LEDGER: LedgerEntry[] = [
+  // Order 1 (Nomvula Dlamini - ZAR 72,450)
+  {
+    id: 'led-nomvula-1a',
+    orderId: 'ord-nomvula-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'customer_clearing',
+    debitMinor: 72450,
+    creditMinor: 0,
+    currency: 'ZAR',
+    description: 'Paystack Settlement: Customer payment received for Order NX-948210 (Nomvula Dlamini)',
+    timestamp: '2026-09-15T14:20:00Z',
+  },
+  {
+    id: 'led-nomvula-1b',
+    orderId: 'ord-nomvula-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'organizer_payable',
+    debitMinor: 0,
+    creditMinor: 70000,
+    currency: 'ZAR',
+    description: 'Escrow Reserve: Ticket proceeds allocated to Cape Town Vibes Live Ltd',
+    timestamp: '2026-09-15T14:20:00Z',
+  },
+  {
+    id: 'led-nomvula-1c',
+    orderId: 'ord-nomvula-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'platform_commission',
+    debitMinor: 0,
+    creditMinor: 2450,
+    currency: 'ZAR',
+    description: 'Nexora Booking Fee & Commission (3.5%)',
+    timestamp: '2026-09-15T14:20:00Z',
+  },
+
+  // Order 2 (Nomvula Dlamini - ZAR 46,575)
+  {
+    id: 'led-nomvula-2a',
+    orderId: 'ord-nomvula-2',
+    eventId: 'evt-joburg-art-biennale-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'customer_clearing',
+    debitMinor: 46575,
+    creditMinor: 0,
+    currency: 'ZAR',
+    description: 'Ozow Instant EFT Clearing: Order NX-481920 (Nomvula Dlamini)',
+    timestamp: '2026-10-02T10:15:00Z',
+  },
+  {
+    id: 'led-nomvula-2b',
+    orderId: 'ord-nomvula-2',
+    eventId: 'evt-joburg-art-biennale-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'organizer_payable',
+    debitMinor: 0,
+    creditMinor: 45000,
+    currency: 'ZAR',
+    description: 'Art Biennale Ticket Escrow Proceeds Payable',
+    timestamp: '2026-10-02T10:15:00Z',
+  },
+  {
+    id: 'led-nomvula-2c',
+    orderId: 'ord-nomvula-2',
+    eventId: 'evt-joburg-art-biennale-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'platform_commission',
+    debitMinor: 0,
+    creditMinor: 1575,
+    currency: 'ZAR',
+    description: 'Nexora Platform Convenience Fee',
+    timestamp: '2026-10-02T10:15:00Z',
+  },
+
+  // Order 4 Dispute Reversal (Tariq Ben-Youssef - ZAR 351,900)
+  {
+    id: 'led-tariq-1a',
+    orderId: 'ord-tariq-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'refund_reserve',
+    debitMinor: 351900,
+    creditMinor: 0,
+    currency: 'ZAR',
+    description: 'Chargeback Reversal: Order NX-193821 (Tariq Ben-Youssef)',
+    timestamp: '2026-09-12T04:10:00Z',
+  },
+  {
+    id: 'led-tariq-1b',
+    orderId: 'ord-tariq-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    organizerId: 'org-cape-vibes',
+    type: 'refund_reversal',
+    debitMinor: 0,
+    creditMinor: 351900,
+    currency: 'ZAR',
+    description: 'Bank Chargeback Settlement Clearing debited to merchant reserve',
+    timestamp: '2026-09-12T04:10:00Z',
+  },
+];
+
 class NexoraStore {
   private events: Event[] = [];
   private orders: Order[] = [];
@@ -1247,6 +1827,7 @@ class NexoraStore {
   private marketingCampaigns: MarketingCampaign[] = [];
   private priorityTasks: PriorityTask[] = [];
   private activityFeed: ActivityFeedItem[] = [];
+  private platformUsers: AuthUser[] = [];
   private integrations: Record<string, ThirdPartyIntegration[]> = {};
   private customWebhooks: Record<string, CustomWebhookEndpoint[]> = {};
   private webhookDeliveryLogs: Record<string, WebhookDeliveryLog[]> = {};
@@ -1262,10 +1843,27 @@ class NexoraStore {
     this.events = loadFromStorage('events', INITIAL_EVENTS);
     this.organizers = loadFromStorage('organizers', INITIAL_ORGANIZERS);
     this.promoCodes = loadFromStorage('promos', INITIAL_PROMO_CODES);
-    this.orders = loadFromStorage('orders', []);
-    this.tickets = loadFromStorage('tickets', []);
+    this.orders = loadFromStorage('orders', INITIAL_SAMPLE_ORDERS);
+    if (!this.orders || this.orders.length === 0) {
+      this.orders = INITIAL_SAMPLE_ORDERS;
+      saveToStorage('orders', this.orders);
+    }
+    this.tickets = loadFromStorage('tickets', INITIAL_SAMPLE_TICKETS);
+    if (!this.tickets || this.tickets.length === 0) {
+      this.tickets = INITIAL_SAMPLE_TICKETS;
+      saveToStorage('tickets', this.tickets);
+    }
     this.checkIns = loadFromStorage('checkins', []);
-    this.ledger = loadFromStorage('ledger', []);
+    this.ledger = loadFromStorage('ledger', INITIAL_SAMPLE_LEDGER);
+    if (!this.ledger || this.ledger.length === 0) {
+      this.ledger = INITIAL_SAMPLE_LEDGER;
+      saveToStorage('ledger', this.ledger);
+    }
+    this.platformUsers = loadFromStorage('platform_users', INITIAL_PLATFORM_USERS);
+    if (!this.platformUsers || this.platformUsers.length === 0) {
+      this.platformUsers = INITIAL_PLATFORM_USERS;
+      saveToStorage('platform_users', this.platformUsers);
+    }
     this.payouts = loadFromStorage('payouts', []);
     this.refundRequests = loadFromStorage('refunds', []);
     this.teamMembers = loadFromStorage('team', INITIAL_TEAM_MEMBERS);
@@ -2569,6 +3167,126 @@ class NexoraStore {
   public logout(): void {
     this.currentUser = null;
     saveToStorage('auth_user', null);
+  }
+
+  // =========================================================================
+  // User Management & Security Operations
+  // =========================================================================
+  public getUsers(): AuthUser[] {
+    return [...this.platformUsers];
+  }
+
+  public getUserById(id: string): AuthUser | undefined {
+    return this.platformUsers.find(
+      u => u.id === id || u.email.toLowerCase() === id.toLowerCase()
+    );
+  }
+
+  public updateUser(id: string, updates: Partial<AuthUser>): AuthUser | null {
+    const idx = this.platformUsers.findIndex(
+      u => u.id === id || u.email.toLowerCase() === id.toLowerCase()
+    );
+    if (idx === -1) return null;
+
+    const existing = this.platformUsers[idx];
+    const updated: AuthUser = {
+      ...existing,
+      ...updates,
+    };
+
+    this.platformUsers[idx] = updated;
+    saveToStorage('platform_users', this.platformUsers);
+
+    return updated;
+  }
+
+  public suspendUser(id: string, reason: string): boolean {
+    const user = this.getUserById(id);
+    if (!user) return false;
+
+    this.updateUser(user.id, {
+      status: 'suspended',
+      suspensionReason: reason,
+      riskScore: Math.max(user.riskScore || 0, 80),
+    });
+
+    this.logActivity({
+      type: 'profile',
+      title: 'User Account Suspended',
+      description: `Account for ${user.name} (${user.email}) suspended by Super Admin. Reason: ${reason}`,
+      actor: 'Super Admin',
+    });
+
+    return true;
+  }
+
+  public unsuspendUser(id: string): boolean {
+    const user = this.getUserById(id);
+    if (!user) return false;
+
+    this.updateUser(user.id, {
+      status: 'active',
+      suspensionReason: undefined,
+      riskScore: Math.min(user.riskScore || 20, 20),
+    });
+
+    this.logActivity({
+      type: 'profile',
+      title: 'User Account Reinstated',
+      description: `Account suspension lifted for ${user.name} (${user.email}) by Super Admin.`,
+      actor: 'Super Admin',
+    });
+
+    return true;
+  }
+
+  public resetUserRole(id: string, newRole: AuthUser['role']): boolean {
+    const user = this.getUserById(id);
+    if (!user) return false;
+
+    const oldRole = user.role;
+    this.updateUser(user.id, { role: newRole });
+
+    this.logActivity({
+      type: 'profile',
+      title: 'User Role Reset',
+      description: `Role for ${user.name} updated from ${oldRole} to ${newRole} by Super Admin.`,
+      actor: 'Super Admin',
+    });
+
+    return true;
+  }
+
+  public getUserOrders(userEmailOrId: string): Order[] {
+    const target = userEmailOrId.toLowerCase();
+    const user = this.getUserById(userEmailOrId);
+    const userEmail = user?.email.toLowerCase() || target;
+    const userName = user?.name.toLowerCase() || '';
+
+    return this.orders.filter(o => 
+      o.customerEmail.toLowerCase() === userEmail ||
+      (userName && o.customerName.toLowerCase() === userName) ||
+      o.id.toLowerCase() === target
+    );
+  }
+
+  public getUserTickets(userEmailOrId: string): Ticket[] {
+    const target = userEmailOrId.toLowerCase();
+    const user = this.getUserById(userEmailOrId);
+    const userEmail = user?.email.toLowerCase() || target;
+    const userName = user?.name.toLowerCase() || '';
+
+    return this.tickets.filter(t => 
+      t.attendeeEmail.toLowerCase() === userEmail ||
+      (userName && t.attendeeName.toLowerCase().includes(userName)) ||
+      t.id.toLowerCase() === target
+    );
+  }
+
+  public getUserLedgerEntries(userEmailOrId: string): LedgerEntry[] {
+    const userOrders = this.getUserOrders(userEmailOrId);
+    const orderIds = new Set(userOrders.map(o => o.id));
+    return this.ledger.filter(l => (l.orderId && orderIds.has(l.orderId)));
   }
 }
 
