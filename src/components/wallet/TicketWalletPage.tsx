@@ -14,12 +14,17 @@ import {
   Download,
   ExternalLink,
   Coins,
-  Ticket as TicketIcon
+  Ticket as TicketIcon,
+  Radio,
+  Timer,
+  Zap
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { Ticket, RefundRequest } from '../../types';
 import { store } from '../../lib/store';
 import { formatCurrency, formatEventDate } from '../../lib/currencies';
+import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
+
 
 interface TicketWalletPageProps {
   tickets: Ticket[];
@@ -56,6 +61,11 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
   // Filter tabs
   const [statusFilter, setStatusFilter] = useState<'all' | 'valid' | 'checked_in' | 'refunded'>('all');
   const [searchRef, setSearchRef] = useState('');
+  const [isCashlessOpen, setIsCashlessOpen] = useState(false);
+
+  const activeWaitlistClaim = store.getActiveClaimForUser(
+    tickets[0]?.attendeeEmail || 'nomvula.dlamini@example.com'
+  );
 
   useEffect(() => {
     async function genQRs() {
@@ -174,8 +184,21 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
             </p>
           </div>
 
-          {/* Search & Status Pill Filters */}
+          {/* Search & Status Pill Filters + Cashless Button */}
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => setIsCashlessOpen(true)}
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-mono font-bold rounded-xl transition-all cursor-pointer border shadow-xs ${
+                isDark
+                  ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+              }`}
+              title="Open Cashless RFID Wristband Terminal"
+            >
+              <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
+              <span>Cashless Wristband (NFC)</span>
+            </button>
+
             <div className={`flex items-center px-3 py-2 rounded-xl text-xs ${
               isDark ? 'bg-[#101014] text-white' : 'bg-neutral-100 text-black'
             }`}>
@@ -208,6 +231,43 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
             </div>
           </div>
         </div>
+
+        {/* ACTIVE WAITLIST CLAIM ALERT BANNER */}
+        {activeWaitlistClaim && (
+          <div className={`p-4 sm:p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in shadow-lg ${
+            isDark ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-950'
+          }`}>
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-amber-400 text-black flex items-center justify-center font-bold shrink-0 shadow-md">
+                <Zap className="w-6 h-6" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider opacity-80">
+                    Priority Waitlist Unlock Active
+                  </span>
+                </div>
+                <h3 className="font-bold text-sm sm:text-base">
+                  A ticket has been released for {activeWaitlistClaim.eventTitle}!
+                </h3>
+                <p className="text-xs opacity-75 font-mono">
+                  Your 2-hour exclusive booking window is ticking. Secure your admission pass before reallocation.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                window.location.href = `/?claimToken=${activeWaitlistClaim.claimToken}`;
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-mono font-extrabold uppercase tracking-wider bg-amber-400 text-black hover:bg-amber-300 transition-all cursor-pointer whitespace-nowrap shadow-md self-start sm:self-center"
+            >
+              Claim Pass Now
+            </button>
+          </div>
+        )}
+
 
         {/* Empty State */}
         {filteredTickets.length === 0 ? (
@@ -474,6 +534,17 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* Cashless RFID Wristband Terminal Modal */}
+      {isCashlessOpen && (
+        <CashlessTerminalModal
+          isOpen={isCashlessOpen}
+          onClose={() => setIsCashlessOpen(false)}
+          attendeeEmail={tickets[0]?.attendeeEmail || 'nomvula.dlamini@example.com'}
+          attendeeName={tickets[0]?.attendeeName || 'Nomvula Dlamini'}
+          theme={theme}
+        />
       )}
 
     </div>

@@ -87,6 +87,8 @@ import { EditEventPage } from './EditEventPage';
 import { OrganizerProfilePage } from './OrganizerProfilePage';
 import { EditOrganizerProfileModal } from './EditOrganizerProfileModal';
 import { IntegrationsManager } from './IntegrationsManager';
+import { WaitlistReclamationDrawer } from '../admin/WaitlistReclamationDrawer';
+import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
 
 interface OrganizerPortalProps {
   onBackToMarketplace: () => void;
@@ -106,6 +108,8 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
   const [engagementSubTab, setEngagementSubTab] = useState<'hub' | 'checkin' | 'campaigns' | 'reports' | 'settings'>('hub');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [showWaitlistDrawer, setShowWaitlistDrawer] = useState(false);
+  const [showCashlessTerminal, setShowCashlessTerminal] = useState(false);
 
   // Theme Switching
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
@@ -1060,6 +1064,28 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setShowWaitlistDrawer(true)}
+                      className={`px-3 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        isDarkTheme ? 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20' : 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
+                      }`}
+                      title="Open Waitlist Reclamation & Priority Queue"
+                    >
+                      <Users className="w-4 h-4 text-amber-400" />
+                      <span>Waitlist Engine</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowCashlessTerminal(true)}
+                      className={`px-3 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        isDarkTheme ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 border-emerald-300 text-emerald-900 hover:bg-emerald-100'
+                      }`}
+                      title="Open On-Site Cashless RFID Wristband Terminal"
+                    >
+                      <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
+                      <span>Cashless RFID POS</span>
+                    </button>
+
                     <button
                       onClick={() => {
                         setStudioTemplate(undefined);
@@ -3139,6 +3165,25 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
             theme={isDarkTheme ? 'dark' : 'light'}
           />
         </div>
+      )}
+
+      {/* Waitlist Queue & Automated Reclamation Drawer */}
+      {showWaitlistDrawer && (
+        <WaitlistReclamationDrawer
+          isOpen={showWaitlistDrawer}
+          onClose={() => setShowWaitlistDrawer(false)}
+          events={allEvents}
+          theme={isDarkTheme ? 'dark' : 'light'}
+        />
+      )}
+
+      {/* Cashless RFID Wristband & POS Terminal Modal */}
+      {showCashlessTerminal && (
+        <CashlessTerminalModal
+          isOpen={showCashlessTerminal}
+          onClose={() => setShowCashlessTerminal(false)}
+          theme={isDarkTheme ? 'dark' : 'light'}
+        />
       )}
 
     </div>

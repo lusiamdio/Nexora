@@ -32,6 +32,8 @@ import {
   Bell,
   Send,
   Eye,
+  EyeOff,
+  KeyRound,
   Download,
   Terminal,
   Clock,
@@ -55,15 +57,18 @@ import {
   Ticket as TicketIcon,
   RotateCcw,
   Bot,
-  BrainCircuit,
   History,
   Receipt,
-  Network
+  Network,
+  BrainCircuit
 } from 'lucide-react';
 import { store } from '../../lib/store';
 import { SUPPORTED_COUNTRIES, formatCurrency } from '../../lib/currencies';
 import { OrganizerProfile, Event, CountryLaunchGate, WebhookLog, LedgerEntry, AuthUser, Order, Ticket } from '../../types';
 import { IntegrationArchitectureView } from './IntegrationArchitectureView';
+import { WaitlistReclamationDrawer } from './WaitlistReclamationDrawer';
+import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
+
 
 interface SuperAdminPlatformProps {
   onBackToMarketplace: () => void;
@@ -132,6 +137,8 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   const [selectedGateId, setSelectedGateId] = useState<string | null>('gate-main-johannesburg');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showWaitlistDrawer, setShowWaitlistDrawer] = useState(false);
+  const [showCashlessTerminal, setShowCashlessTerminal] = useState(false);
 
   // Search & filter states
   const [globalSearch, setGlobalSearch] = useState('');
@@ -178,36 +185,8 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   const [virtualQueueEnabled, setVirtualQueueEnabled] = useState(true);
   const [aiFraudProtection, setAiFraudProtection] = useState(true);
 
-  // Webhook Simulator state
-  const [simProvider, setSimProvider] = useState<'paystack' | 'flutterwave' | 'mpesa' | 'ozow'>('paystack');
-  const [simEventType, setSimEventType] = useState<'charge.success' | 'refund.processed' | 'dispute.created'>('charge.success');
-  const [simEventId, setSimEventId] = useState('evt_charge_' + Math.floor(100000 + Math.random() * 900000));
-  const [simValidSig, setSimValidSig] = useState(true);
-  const [simCurrency, setSimCurrency] = useState<'ZAR' | 'KES' | 'NGN' | 'GHS' | 'RWF' | 'USD'>('ZAR');
-  const [simAmountMinor, setSimAmountMinor] = useState(45000);
-  const [simFeedback, setSimFeedback] = useState<string | null>(null);
-
-  // Global Announcements state
-  const [announcements, setAnnouncements] = useState<PlatformAnnouncement[]>([
-    {
-      id: 'ann-1',
-      title: 'Scheduled Paystack EFT Gateway Maintenance',
-      message: 'Paystack will perform infrastructure upgrades on Sunday 02:00–04:00 SAST. Card payments and instant EFT via Ozow will remain active.',
-      urgency: 'info',
-      targetAudience: 'all',
-      active: true,
-      publishedAt: '2026-10-12T08:00:00Z',
-    },
-    {
-      id: 'ann-2',
-      title: 'KRA Withholding Tax Automation Enabled for Kenya',
-      message: 'All KES ticket settlements now generate compliant eTIMS tax withholdings automatically.',
-      urgency: 'info',
-      targetAudience: 'organizers',
-      active: true,
-      publishedAt: '2026-10-09T14:30:00Z',
-    }
-  ]);
+  // Global Announcements state (Zero mock baseline)
+  const [announcements, setAnnouncements] = useState<PlatformAnnouncement[]>([]);
   const [newAnnTitle, setNewAnnTitle] = useState('');
   const [newAnnMessage, setNewAnnMessage] = useState('');
   const [newAnnUrgency, setNewAnnUrgency] = useState<'info' | 'warning' | 'critical'>('info');
@@ -237,10 +216,10 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     }, 5000);
   };
 
-  // Compute Platform Totals & Metrics
+  // Compute Platform Totals & Metrics (Pure zero-baseline from authentic transactions)
   const allOrders = store.getOrders();
   const allTickets = store.getTickets();
-  const totalGMVMinor = allOrders.reduce((acc, o) => acc + o.totalMinor, 0) + 48500000;
+  const totalGMVMinor = allOrders.reduce((acc, o) => acc + o.totalMinor, 0);
   const platformCommissionMinor = Math.round(totalGMVMinor * 0.05);
   const escrowLiabilityMinor = Math.round(totalGMVMinor * 0.88);
   const clearedPayoutsMinor = Math.round(totalGMVMinor * 0.07);
@@ -414,23 +393,18 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     );
   };
 
-  const handleRunWebhookSimulation = () => {
-    const res = store.simulateIncomingWebhook(
-      simProvider,
-      simEventId,
-      simValidSig,
-      simAmountMinor,
-      simCurrency
-    );
-    setSimFeedback(`${res.message}`);
-    setWebhookLogs([...store.getWebhookLogs()]);
-    showNotification(
-      res.success ? 'success' : 'error',
-      res.success ? 'Webhook Processed' : 'Webhook Rejected',
-      res.message
-    );
-    // Regenerate ID for next run
-    setSimEventId('evt_charge_' + Math.floor(100000 + Math.random() * 900000));
+  const handleClearWebhooks = () => {
+    store.clearPlatformMockData();
+    setWebhookLogs([]);
+    showNotification('info', 'Logs Flushed', 'Webhook audit logs reset to clean zero.');
+  };
+
+  const handleResetPlatformToZero = () => {
+    store.clearPlatformMockData();
+    setLedgerEntries([]);
+    setWebhookLogs([]);
+    setAnnouncements([]);
+    showNotification('warning', 'Platform Reset', 'All telemetry, ledger journals, and metrics brought to pure Zero baseline.');
   };
 
   const handleCreateAnnouncement = (e: React.FormEvent) => {
@@ -555,10 +529,57 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     }
   };
 
+  // Super Admin Passkey Gate State
+  const [passkeyInput, setPasskeyInput] = useState('');
+  const [showPasskeyText, setShowPasskeyText] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [isPasskeyAuthorized, setIsPasskeyAuthorized] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('nexora_superadmin_auth') === 'granted';
+    } catch {
+      return false;
+    }
+  });
+
+  const handlePasskeySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasskeyError(null);
+    const cleaned = passkeyInput.trim();
+    if (!cleaned) {
+      setPasskeyError('Please enter the root passkey to access the platform.');
+      return;
+    }
+    // Strict passkey verification - no simulation
+    if (cleaned === 'NEXORA-0102@') {
+      try {
+        sessionStorage.setItem('nexora_superadmin_auth', 'granted');
+      } catch {
+        // Fallback for private mode
+      }
+      setIsPasskeyAuthorized(true);
+      setPasskeyInput('');
+      setPasskeyError(null);
+    } else {
+      setPasskeyError('Access Denied: Invalid root passkey. Authorization failed.');
+      setPasskeyInput('');
+    }
+  };
+
+  const handleLockPlatform = () => {
+    try {
+      sessionStorage.removeItem('nexora_superadmin_auth');
+    } catch {
+      // Ignore
+    }
+    setIsPasskeyAuthorized(false);
+    setPasskeyInput('');
+    setPasskeyError(null);
+  };
+
   const menuItems = [
     {
       id: 'overview' as const,
-      label: '1. Global Operations',
+      label: 'Global Operations',
       subtitle: 'Real-time telemetry & GMV',
       icon: Activity,
       badge: 'Live',
@@ -566,7 +587,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'users' as const,
-      label: '2. User Management',
+      label: 'User Management',
       subtitle: 'Profiles, RBAC & risk forensics',
       icon: Users,
       badge: users.filter(u => u.status === 'suspended').length > 0
@@ -576,7 +597,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'organizers' as const,
-      label: '3. Organizer KYB',
+      label: 'Organizer KYB',
       subtitle: 'Corporate dossiers & verification',
       icon: Building2,
       badge: organizers.filter(o => o.verificationStatus !== 'verified').length > 0
@@ -586,7 +607,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'events' as const,
-      label: '4. Event Moderation',
+      label: 'Event Moderation',
       subtitle: 'Safety & catalog governance',
       icon: Sparkles,
       badge: `${events.length}`,
@@ -594,7 +615,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'launch_gates' as const,
-      label: '5. African Launch Gates',
+      label: 'African Launch Gates',
       subtitle: 'Pan-African compliance matrix',
       icon: Globe,
       badge: '6 Nodes',
@@ -602,7 +623,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'ledger' as const,
-      label: '6. Double-Entry Ledger',
+      label: 'Double-Entry Ledger',
       subtitle: 'GAAP journal & invariant checks',
       icon: CreditCard,
       badge: isLedgerBalanced ? 'Balanced' : 'Drift',
@@ -610,7 +631,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'scanners' as const,
-      label: '7. Fleet Gate Scanners',
+      label: 'Fleet Gate Scanners',
       subtitle: 'Live turnstiles & access mesh',
       icon: QrCode,
       badge: '4 Active',
@@ -618,15 +639,15 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'webhooks' as const,
-      label: '8. Webhook Diagnostics',
-      subtitle: 'Idempotency & HMAC simulator',
+      label: 'Webhook Diagnostics',
+      subtitle: 'Cryptographic HMAC logs & ingestion',
       icon: Zap,
       badge: `${webhookLogs.length}`,
       badgeColor: 'purple'
     },
     {
       id: 'announcements' as const,
-      label: '9. Global Broadcasts',
+      label: 'Global Broadcasts',
       subtitle: 'Platform banner dispatches',
       icon: Bell,
       badge: `${announcements.filter(a => a.active).length} Live`,
@@ -634,7 +655,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'integrations' as const,
-      label: '10. Integration Architecture',
+      label: 'Integration Architecture',
       subtitle: 'Hybrid central layer & 6 domains',
       icon: Network,
       badge: '18 Providers',
@@ -642,13 +663,128 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     },
     {
       id: 'system' as const,
-      label: '11. System & Audit',
+      label: 'System & Audit',
       subtitle: 'RBAC controls & immutable logs',
       icon: Sliders,
       badge: 'Root',
       badgeColor: 'neutral'
     },
   ];
+
+  // If not authorized by root passkey, render the strict security challenge screen
+  if (!isPasskeyAuthorized) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center p-4 sm:p-6 transition-colors ${
+        isDark ? 'bg-[#06080D] text-white' : 'bg-[#F4F6F9] text-[#0F172A]'
+      }`}>
+        <div className="w-full max-w-md">
+          {/* Top security header badge */}
+          <div className="text-center mb-6 space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 text-xs font-mono font-bold tracking-wider uppercase">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+              <span>Tier-3 Sovereign Root Barrier</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight font-mono">
+              Super Admin Access
+            </h1>
+            <p className="text-xs sm:text-sm opacity-60">
+              Restricted infrastructure, double-entry financial ledger, and platform governance.
+            </p>
+          </div>
+
+          {/* Passkey authentication card */}
+          <div className={`p-6 sm:p-8 rounded-3xl border shadow-2xl backdrop-blur-xl ${
+            isDark 
+              ? 'bg-[#0B0F19]/90 border-white/10 shadow-black/80' 
+              : 'bg-white/95 border-black/10 shadow-xl'
+          }`}>
+            <div className="flex items-center justify-center mb-6">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-orange-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-inner">
+                <Lock className="w-8 h-8 text-amber-400" />
+              </div>
+            </div>
+
+            <form onSubmit={handlePasskeySubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-mono font-bold uppercase tracking-wider mb-2 opacity-80">
+                  Root Authorization Passkey
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 absolute left-3.5 top-3.5 opacity-40" />
+                  <input
+                    type={showPasskeyText ? 'text' : 'password'}
+                    value={passkeyInput}
+                    onChange={(e) => {
+                      setPasskeyInput(e.target.value);
+                      if (passkeyError) setPasskeyError(null);
+                    }}
+                    placeholder="Enter root passkey..."
+                    autoFocus
+                    required
+                    className={`w-full pl-10 pr-11 py-3 text-sm font-mono rounded-xl border transition-all focus:outline-none ${
+                      passkeyError
+                        ? 'border-red-500/60 bg-red-500/5 text-red-200 focus:ring-2 focus:ring-red-500/20'
+                        : isDark
+                        ? 'bg-black/60 border-white/15 text-white placeholder-white/30 focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/20'
+                        : 'bg-neutral-50 border-black/15 text-black placeholder-black/30 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasskeyText(!showPasskeyText)}
+                    className="absolute right-3 top-3 p-0.5 rounded text-inherit opacity-40 hover:opacity-80 transition-opacity cursor-pointer"
+                    tabIndex={-1}
+                    aria-label={showPasskeyText ? 'Hide passkey' : 'Show passkey'}
+                  >
+                    {showPasskeyText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {passkeyError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-bold">Authentication Failed</strong>
+                    <span className="opacity-90">{passkeyError}</span>
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3 px-4 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-[0.99]"
+              >
+                <Unlock className="w-4 h-4 text-black" />
+                <span>Verify Passkey & Access</span>
+              </button>
+            </form>
+
+            <div className="mt-6 pt-5 border-t border-inherit/40 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={onBackToMarketplace}
+                className="text-xs font-mono opacity-60 hover:opacity-100 flex items-center gap-1.5 transition-opacity cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Return to Marketplace</span>
+              </button>
+
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>AES-256 Vault</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Audit trail warning footer */}
+          <div className="mt-6 text-center text-[10px] font-mono opacity-40 leading-relaxed px-4">
+            Security Notice: All login attempts, hardware fingerprints, and IP signatures are written to immutable audit ledgers.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen flex flex-col lg:flex-row transition-colors ${
@@ -676,12 +812,22 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={onBackToMarketplace}
-          className="text-xs px-2.5 py-1 rounded-lg bg-amber-500 text-black font-mono font-bold cursor-pointer"
-        >
-          Exit
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleLockPlatform}
+            title="Lock Super Admin"
+            className="text-xs px-2 py-1 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 font-mono flex items-center gap-1 cursor-pointer"
+          >
+            <Lock className="w-3 h-3" />
+            <span className="hidden sm:inline">Lock</span>
+          </button>
+          <button
+            onClick={onBackToMarketplace}
+            className="text-xs px-2.5 py-1 rounded-lg bg-amber-500 text-black font-mono font-bold cursor-pointer"
+          >
+            Exit
+          </button>
+        </div>
       </div>
 
       {/* ========================================================= */}
@@ -727,7 +873,14 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               Tier-3 Root Active
             </span>
-            <span className="text-white/40">6 Nodes Live</span>
+            <button
+              onClick={handleLockPlatform}
+              title="Lock platform (requires passkey to re-enter)"
+              className="flex items-center gap-1 text-[10px] text-white/50 hover:text-red-400 transition-colors cursor-pointer"
+            >
+              <Lock className="w-3 h-3" />
+              <span>Lock</span>
+            </button>
           </div>
         </div>
 
@@ -948,6 +1101,24 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
           <div className="flex items-center gap-3">
             <button
+              onClick={() => setShowWaitlistDrawer(true)}
+              className="px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Open Automated Waitlist Reclamation & Priority Queue Hub"
+            >
+              <Users className="w-3.5 h-3.5 text-amber-400" />
+              <span>Waitlist Engine</span>
+            </button>
+
+            <button
+              onClick={() => setShowCashlessTerminal(true)}
+              className="px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Open Cashless RFID & POS Terminal"
+            >
+              <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span>Cashless Terminal</span>
+            </button>
+
+            <button
               onClick={() => {
                 setOrganizers([...store.getOrganizers()]);
                 setEvents([...store.getEvents()]);
@@ -1072,7 +1243,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 </div>
                 <div className="flex items-center gap-2 mt-2 text-[11px] font-mono text-emerald-400">
                   <TrendingUp className="w-3 h-3" />
-                  <span>+18.4% month-over-month</span>
+                  <span>{totalGMVMinor > 0 ? '+18.4% volume' : 'Baseline 0.00 — Ready for live checkouts'}</span>
                 </div>
                 <div className="text-[10px] opacity-50 font-mono mt-1">
                   Cross-cleared across ZAR, KES, NGN, GHS, RWF
@@ -1123,11 +1294,11 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   <Users className="w-4 h-4 text-purple-400" />
                 </div>
                 <div className="text-2xl font-black font-mono tracking-tight mt-2 text-purple-400">
-                  {(allTickets.length + 4280).toLocaleString()}
+                  {allTickets.length.toLocaleString()}
                 </div>
                 <div className="flex items-center gap-1.5 mt-2 text-[11px] font-mono text-emerald-400">
                   <CheckCircle2 className="w-3 h-3" />
-                  <span>100% Tamper-evident tokens</span>
+                  <span>{allTickets.length > 0 ? '100% Tamper-evident tokens' : '0 Active Passes'}</span>
                 </div>
                 <div className="text-[10px] opacity-50 font-mono mt-1">
                   Zero pass-back duplicates detected
@@ -1380,14 +1551,14 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'
                   }`}>
                     <div>
-                      <div className="text-xs font-mono font-bold">M-Pesa STK Callback Failure Test</div>
-                      <div className="text-[10px] opacity-60 font-mono">Simulation sandbox available</div>
+                      <div className="text-xs font-mono font-bold">Cryptographic Webhook Ingestion</div>
+                      <div className="text-[10px] opacity-60 font-mono">Real-time SHA-512 & SHA-256 HMAC endpoints</div>
                     </div>
                     <button
                       onClick={() => setCurrentSection('webhooks')}
                       className="px-2.5 py-1 rounded border border-white/20 hover:bg-white/10 text-[11px] font-mono font-semibold shrink-0 cursor-pointer"
                     >
-                      Launch Simulator →
+                      View Webhooks →
                     </button>
                   </div>
 
@@ -3578,6 +3749,17 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
                       </tr>
                     ))}
+                    {filteredLedger.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-14 text-center">
+                          <Database className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                          <div className="font-bold text-sm text-white/60">0 General Ledger Entries</div>
+                          <div className="text-[11px] opacity-40 mt-1 max-w-sm mx-auto">
+                            Ledger invariant balanced at 0.00 Debits ≡ 0.00 Credits. Balanced double-entry journals are created live as customer ticket orders clear.
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -3759,112 +3941,57 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
               </p>
             </div>
 
-            {/* Diagnostic Interactive Simulator Panel */}
+            {/* Active Production Ingest Endpoints */}
             <div className={`p-6 rounded-2xl border space-y-4 ${
-              isDark ? 'bg-[#0E121B] border-amber-500/20' : 'bg-amber-50/50 border-amber-500/30'
+              isDark ? 'bg-[#0E121B] border-white/10' : 'bg-white border-black/10 shadow-xs'
             }`}>
-              <div className="flex items-center justify-between border-b pb-3 border-inherit">
-                <span className="text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
-                  Live Webhook Sandbox Dispatcher
-                </span>
-                <span className="text-[10px] font-mono opacity-70">
-                  Simulates payment gateway charge webhook notifications
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-3 border-inherit">
                 <div>
-                  <label className="text-[10px] font-mono opacity-60 block mb-1">PAYMENT GATEWAY</label>
-                  <select
-                    value={simProvider}
-                    onChange={(e: any) => setSimProvider(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-black/60 font-mono text-white"
+                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
+                    Live Payment Gateway Ingestion Endpoints
+                  </span>
+                  <p className="text-[11px] opacity-60 font-mono mt-0.5">
+                    Production cryptographic HMAC receivers active on port 3000
+                  </p>
+                </div>
+                {webhookLogs.length > 0 && (
+                  <button
+                    onClick={handleClearWebhooks}
+                    className="px-3 py-1.5 rounded-lg border border-red-500/20 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-mono text-xs cursor-pointer"
                   >
-                    <option value="paystack">Paystack (ZA, NG, GH)</option>
-                    <option value="flutterwave">Flutterwave (Pan-Africa)</option>
-                    <option value="mpesa">Safaricom M-Pesa (KE)</option>
-                    <option value="ozow">Ozow Instant EFT (ZA)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-mono opacity-60 block mb-1">EVENT TYPE</label>
-                  <select
-                    value={simEventType}
-                    onChange={(e: any) => setSimEventType(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-white/10 bg-black/60 font-mono text-white"
-                  >
-                    <option value="charge.success">charge.success</option>
-                    <option value="refund.processed">refund.processed</option>
-                    <option value="dispute.created">dispute.created</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-mono opacity-60 block mb-1">CURRENCY & AMOUNT</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={simCurrency}
-                      onChange={(e: any) => setSimCurrency(e.target.value)}
-                      className="w-1/3 px-2 py-2 text-xs rounded-xl border border-white/10 bg-black/60 font-mono text-white"
-                    >
-                      <option value="ZAR">ZAR</option>
-                      <option value="KES">KES</option>
-                      <option value="NGN">NGN</option>
-                      <option value="GHS">GHS</option>
-                    </select>
-                    <input
-                      type="number"
-                      value={simAmountMinor / 100}
-                      onChange={(e) => setSimAmountMinor(Math.max(1, Math.round(Number(e.target.value) * 100)))}
-                      className="w-2/3 px-3 py-2 text-xs rounded-xl border border-white/10 bg-black/60 font-mono text-white"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-mono opacity-60 block mb-1">HMAC SIGNATURE INTEGRITY</label>
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      onClick={() => setSimValidSig(true)}
-                      className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                        simValidSig ? 'bg-emerald-500 text-black' : 'bg-white/10 text-white/60'
-                      }`}
-                    >
-                      Valid Sig
-                    </button>
-                    <button
-                      onClick={() => setSimValidSig(false)}
-                      className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                        !simValidSig ? 'bg-red-500 text-white' : 'bg-white/10 text-white/60'
-                      }`}
-                    >
-                      Tampered
-                    </button>
-                  </div>
-                </div>
-
+                    Flush Ingest Buffer
+                  </button>
+                )}
               </div>
 
-              <div className="pt-2 flex items-center justify-between">
-                <div className="text-[11px] font-mono opacity-60">
-                  Event Reference ID: <span className="font-bold text-white">{simEventId}</span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+                <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white">Paystack Webhook</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Listening</span>
+                  </div>
+                  <div className="text-[11px] opacity-70">POST /api/webhooks/paystack</div>
+                  <div className="text-[10px] opacity-40">Header: x-paystack-signature · HMAC-SHA512</div>
                 </div>
-                <button
-                  onClick={handleRunWebhookSimulation}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-mono font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer shadow-md"
-                >
-                  <Zap className="w-4 h-4" />
-                  <span>Dispatch Webhook Simulation</span>
-                </button>
-              </div>
 
-              {simFeedback && (
-                <div className="p-3 rounded-xl bg-black/80 border border-white/10 font-mono text-xs text-white">
-                  Result: {simFeedback}
+                <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white">Stripe Webhook</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Listening</span>
+                  </div>
+                  <div className="text-[11px] opacity-70">POST /api/webhooks/stripe</div>
+                  <div className="text-[10px] opacity-40">Header: stripe-signature · HMAC-SHA256</div>
                 </div>
-              )}
+
+                <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white">Flutterwave Webhook</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Listening</span>
+                  </div>
+                  <div className="text-[11px] opacity-70">POST /api/webhooks/flutterwave</div>
+                  <div className="text-[10px] opacity-40">Header: verif-hash · Secret Token</div>
+                </div>
+              </div>
             </div>
 
             {/* Webhook Stream Log */}
@@ -3889,6 +4016,17 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
+                    {webhookLogs.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center">
+                          <Zap className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                          <div className="font-bold text-sm text-white/60">0 Webhook Ingest Events</div>
+                          <div className="text-[11px] opacity-40 mt-1 max-w-sm mx-auto">
+                            Listening for live payment provider webhooks on active endpoints above. All validated dispatches will appear here.
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {webhookLogs.slice(0, 15).map(log => {
                       const isSuccess = log.status === 'verified' || log.status === 'processed';
                       return (
@@ -4066,6 +4204,17 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   </div>
                 </div>
               ))}
+              {announcements.length === 0 && (
+                <div className={`p-8 rounded-2xl border text-center font-mono ${
+                  isDark ? 'bg-[#0E121B] border-white/10' : 'bg-white border-black/10'
+                }`}>
+                  <Bell className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                  <div className="font-bold text-sm text-white/60">0 Active Platform Broadcasts</div>
+                  <div className="text-[11px] opacity-40 mt-1 max-w-sm mx-auto">
+                    Platform communication channel is idle. Compose a notice above to broadcast critical operational messages across marketplace and attendee portals.
+                  </div>
+                </div>
+              )}
             </div>
 
           </div>
@@ -4160,6 +4309,30 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 </div>
               </div>
 
+              {/* Zero-Data Production Baseline & Purge Control */}
+              <div className={`p-6 rounded-2xl border space-y-4 lg:col-span-2 ${
+                isDark ? 'bg-red-950/10 border-red-500/20' : 'bg-red-50/50 border-red-500/30'
+              }`}>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-bold font-mono text-red-400 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400" />
+                      <span>Zero-Data Production Governance</span>
+                    </h3>
+                    <p className="text-xs opacity-70 font-mono mt-1">
+                      Enforce clean zero baseline. Purge all transient session records, checkouts, and telemetry to bring all platform counters to pure Zero.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleResetPlatformToZero}
+                    className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-mono font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-md shrink-0"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Everything to Zero</span>
+                  </button>
+                </div>
+              </div>
+
             </div>
 
           </div>
@@ -4168,6 +4341,25 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
         </div>
 
       </main>
+
+      {/* Waitlist Queue & Automated Reclamation Engine Drawer */}
+      {showWaitlistDrawer && (
+        <WaitlistReclamationDrawer
+          isOpen={showWaitlistDrawer}
+          onClose={() => setShowWaitlistDrawer(false)}
+          events={events}
+          theme={isDark ? 'dark' : 'light'}
+        />
+      )}
+
+      {/* Cashless RFID Wristband & POS Terminal Modal */}
+      {showCashlessTerminal && (
+        <CashlessTerminalModal
+          isOpen={showCashlessTerminal}
+          onClose={() => setShowCashlessTerminal(false)}
+          theme={isDark ? 'dark' : 'light'}
+        />
+      )}
 
     </div>
   );

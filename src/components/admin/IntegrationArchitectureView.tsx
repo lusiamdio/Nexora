@@ -1084,7 +1084,7 @@ export const IntegrationArchitectureView: React.FC<IntegrationArchitectureViewPr
             }`}
           >
             <Play className="w-4 h-4" />
-            <span>End-to-End Lifecycle Simulator (A–E)</span>
+            <span>End-to-End Execution Sequences (A–E)</span>
           </button>
 
           <button
@@ -1753,7 +1753,7 @@ export const IntegrationArchitectureView: React.FC<IntegrationArchitectureViewPr
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-inherit/40 pb-5">
               <div>
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-400">
-                  End-to-End Integration Flow Simulator
+                  End-to-End Integration Flow Architecture
                 </span>
                 <h3 className="text-xl font-black font-mono mt-0.5">{currentWorkflowDef.title}</h3>
                 <p className="text-xs opacity-60 font-mono mt-1">{currentWorkflowDef.subtitle}</p>
@@ -1862,7 +1862,7 @@ export const IntegrationArchitectureView: React.FC<IntegrationArchitectureViewPr
                       <div className="flex items-center justify-between border-b border-white/10 pb-2">
                         <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
                           <Terminal className="w-3.5 h-3.5" />
-                          Simulated Wire Protocol & Payload Inspector
+                          Wire Protocol & Payload Specification
                         </span>
                         <span className="text-[10px] text-white/40">JSON-RPC / Webhook</span>
                       </div>

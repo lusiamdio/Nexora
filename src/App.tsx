@@ -10,6 +10,7 @@ import { AuthPage } from './components/auth/AuthPage';
 import { TicketScannerModal } from './components/scanner/TicketScannerModal';
 import { OrganizerPortal } from './components/organizer/OrganizerPortal';
 import { SuperAdminPlatform } from './components/admin/SuperAdminPlatform';
+import { CommunityPulse } from './components/marketplace/CommunityPulse';
 import { LegalPage } from './components/navigation/LegalPage';
 import { store } from './lib/store';
 import { Event, Ticket, AuthUser } from './types';
@@ -163,11 +164,25 @@ export default function App() {
     setTickets(store.getTickets());
   };
 
-  // Direct shared link listener: automatically loads shared event as a full webpage
+  // Direct shared link & waitlist claim token listener
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get('event');
-    if (eventId) {
+    const claimToken = params.get('claimToken');
+
+    if (claimToken) {
+      const res = store.claimWaitlistTicket(claimToken);
+      if (res.success && res.event && res.entry) {
+        setInspectEvent(res.event);
+        const tierId = res.entry.tierId || res.event.tickets[0]?.id;
+        if (tierId) {
+          setCheckoutEvent(res.event);
+          setCheckoutItems([{ tierId, quantity: 1 }]);
+          setActiveView('checkout');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }
+    } else if (eventId) {
       const found = events.find(e => e.id === eventId);
       if (found) {
         setInspectEvent(found);
@@ -186,8 +201,12 @@ export default function App() {
         setActiveView('marketplace');
       }
     } else if (currentUser?.role === 'organizer') {
-      if (activeView === 'admin') {
+      if (activeView === 'admin' || activeView === 'scanner') {
         setActiveView('organizer');
+      }
+    } else if (!currentUser) {
+      if (activeView === 'admin' || activeView === 'organizer' || activeView === 'scanner') {
+        setActiveView('marketplace');
       }
     }
   }, [currentUser, activeView]);
@@ -382,6 +401,42 @@ export default function App() {
         {activeView === 'marketplace' && (
           <div>
             
+            {/* Active Waitlist Priority Allocation Banner */}
+            {currentUser && store.getActiveClaimForUser(currentUser.email) && (() => {
+              const claim = store.getActiveClaimForUser(currentUser.email)!;
+              return (
+                <div className="w-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-black py-3 px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-xs shadow-xl z-20">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-black animate-pulse shrink-0" />
+                    <span className="font-extrabold uppercase tracking-wider">
+                      Waitlist Allocation Unlocked!
+                    </span>
+                    <span className="hidden md:inline font-sans font-medium text-black/85">
+                      Held tickets for <strong>{claim.eventTitle}</strong> released for your account. 2-Hour exclusive claim window active.
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const found = events.find(e => e.id === claim.eventId);
+                      if (found) {
+                        setInspectEvent(found);
+                        const tierId = claim.tierId || found.tickets[0]?.id;
+                        if (tierId) {
+                          setCheckoutEvent(found);
+                          setCheckoutItems([{ tierId, quantity: 1 }]);
+                          setActiveView('checkout');
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }
+                      }
+                    }}
+                    className="px-4 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 font-bold transition-all cursor-pointer whitespace-nowrap shadow-md text-xs uppercase tracking-wider"
+                  >
+                    Claim Pass Now
+                  </button>
+                </div>
+              );
+            })()}
+
             {/* Curated Hero Section with Background YouTube Video */}
             <Hero
               featuredEvent={featuredEvent}
@@ -504,6 +559,7 @@ export default function App() {
                       key={evt.id}
                       event={evt}
                       currentCurrency={currency}
+                      currentUser={currentUser}
                       onSelect={(e) => {
                         setInspectEvent(e);
                         setActiveView('event');
@@ -516,6 +572,20 @@ export default function App() {
               )}
 
             </section>
+
+            {/* ========================================================= */}
+            {/* COMMUNITY PULSE: MASONRY GRID OF ATTENDEE HIGHLIGHTS      */}
+            {/* ========================================================= */}
+            <CommunityPulse
+              events={events}
+              onSelectEvent={(e) => {
+                setInspectEvent(e);
+                setActiveView('event');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              theme={theme}
+            />
+
 
             {/* ========================================================= */}
             {/* TRUSTED BY SECTION: ANIMATED FROM LEFT TO RIGHT          */}

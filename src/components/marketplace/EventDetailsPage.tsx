@@ -16,10 +16,15 @@ import {
   Coins,
   Copy,
   ExternalLink,
-  Users
+  Users,
+  Bell,
+  Sparkles
 } from 'lucide-react';
 import { Event, AuthUser } from '../../types';
 import { formatCurrency, formatEventDate, formatEventTime } from '../../lib/currencies';
+import { store } from '../../lib/store';
+import { WaitlistModal } from './WaitlistModal';
+
 
 interface EventDetailsPageProps {
   event: Event;
@@ -57,6 +62,10 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
   const [copiedRefCode, setCopiedRefCode] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
+  const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
+  const [isOnWaitlist, setIsOnWaitlist] = useState(() => 
+    currentUser?.email ? store.isOnWaitlist(event.id, currentUser.email) : false
+  );
 
   // Referral System Code & Link Generation
   const userIdentifier = currentUser ? currentUser.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() : 'NEX';
@@ -549,18 +558,56 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
                 </div>
               </div>
 
-              {/* Checkout Action Button */}
-              <button
-                onClick={handleBookNow}
-                disabled={totalSelectedTickets === 0}
-                className={`w-full py-4 text-xs font-bold tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-xl disabled:opacity-40 disabled:cursor-not-allowed ${
-                  isDark
-                    ? 'bg-white hover:bg-neutral-200 text-black'
-                    : 'bg-black hover:bg-neutral-800 text-white'
-                }`}
-              >
-                Proceed to Checkout ({totalSelectedTickets})
-              </button>
+              {/* Checkout Action Button OR Waitlist Button if capacity reached */}
+              {totalRemaining === 0 ? (
+                <div className="space-y-3 pt-2">
+                  <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 space-y-1">
+                    <div className="flex items-center gap-2 font-bold text-sm">
+                      <Clock className="w-4 h-4" />
+                      <span>Capacity Reached · All Tiers Sold Out</span>
+                    </div>
+                    <p className="text-xs opacity-80 leading-relaxed font-mono">
+                      This experience has reached maximum venue capacity. Join the waitlist to receive an automated notification if held tickets or refunds are released.
+                    </p>
+                  </div>
+
+                  {isOnWaitlist ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsWaitlistOpen(true)}
+                      className="w-full py-4 text-xs font-bold font-mono tracking-wider uppercase rounded-xl transition-all cursor-pointer bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center gap-2 hover:bg-emerald-500/30"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>You are on the Waitlist (View Queue)</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsWaitlistOpen(true)}
+                      className={`w-full py-4 text-xs font-bold tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-xl flex items-center justify-center gap-2 ${
+                        isDark
+                          ? 'bg-amber-400 hover:bg-amber-300 text-black font-extrabold shadow-amber-400/20'
+                          : 'bg-black hover:bg-neutral-800 text-white'
+                      }`}
+                    >
+                      <Bell className="w-4 h-4" />
+                      <span>Join Official Waitlist</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={handleBookNow}
+                  disabled={totalSelectedTickets === 0}
+                  className={`w-full py-4 text-xs font-bold tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-xl disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isDark
+                      ? 'bg-white hover:bg-neutral-200 text-black'
+                      : 'bg-black hover:bg-neutral-800 text-white'
+                  }`}
+                >
+                  Proceed to Checkout ({totalSelectedTickets})
+                </button>
+              )}
 
               {/* Referral Promotion Card */}
               <div className={`p-4 rounded-2xl text-xs space-y-2 ${
@@ -588,6 +635,18 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
         </div>
 
       </div>
+
+      {/* Waitlist Modal */}
+      {isWaitlistOpen && (
+        <WaitlistModal
+          event={event}
+          isOpen={isWaitlistOpen}
+          onClose={() => setIsWaitlistOpen(false)}
+          currentUser={currentUser}
+          theme={theme}
+          onSuccess={() => setIsOnWaitlist(true)}
+        />
+      )}
 
     </div>
   );

@@ -553,3 +553,71 @@ export interface NexoraCoreEntity {
   lastMutatedAt: string;
 }
 
+export interface WaitlistEntry {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  email: string;
+  name?: string;
+  tierId?: string;
+  tierName?: string;
+  joinedAt: string;
+  status: 'waiting' | 'notified' | 'claimed' | 'expired';
+  position: number;
+  phone?: string;
+  claimToken?: string;
+  notifiedAt?: string;
+  claimExpiresAt?: string;
+  claimedAt?: string;
+  notificationDispatchLog?: {
+    emailSent: boolean;
+    smsSent: boolean;
+    provider: 'SendGrid' | 'Amazon SES' | 'Twilio';
+    messageId: string;
+  };
+}
+
+export interface CashlessWristband {
+  id: string;
+  uid: string;
+  attendeeEmail: string;
+  attendeeName: string;
+  eventId: string;
+  eventTitle: string;
+  balanceMinor: number;
+  currency: string;
+  status: 'active' | 'blocked' | 'paired';
+  linkedTicketId?: string;
+  pinRequired: boolean;
+  lastTappedAt: string;
+  transactions: Array<{
+    id: string;
+    type: 'topup' | 'purchase' | 'refund';
+    amountMinor: number;
+    vendorName: string;
+    timestamp: string;
+    balanceAfterMinor: number;
+  }>;
+}
+
+
+export interface CommunityHighlight {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  authorName: string;
+  authorHandle: string;
+  authorAvatar: string;
+  roleBadge: string;
+  platform: 'instagram' | 'x' | 'tiktok';
+  imageUrl: string;
+  aspectRatio: 'square' | 'portrait' | 'tall';
+  quote: string;
+  rating?: number;
+  likesCount: number;
+  userLiked?: boolean;
+  timestamp: string;
+  city: string;
+}
+
+

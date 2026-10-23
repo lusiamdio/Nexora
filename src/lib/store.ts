@@ -21,13 +21,21 @@ import {
   WebhookDeliveryLog,
   PlatformCircuitBreakers,
   PlatformSettings,
-  SuperAdminAuditEntry
+  SuperAdminAuditEntry,
+  WaitlistEntry,
+  CommunityHighlight,
+  CashlessWristband
 } from '../types';
 
 import heroFestivalImg from '../assets/images/hero_afro_festival_1791591623547.jpg';
 import techSummitImg from '../assets/images/event_tech_summit_1791591635169.jpg';
 import culinaryWineImg from '../assets/images/event_culinary_wine_1791591643928.jpg';
 import artExhibitImg from '../assets/images/event_art_exhibit_1791591654774.jpg';
+import festivalGuideImg from '../assets/images/festival-guide-1920x1080-1.jpg';
+import rockingDaisiesImg from '../assets/images/Rocking-the-Daisies-558x400.jpg';
+import capeTownEtcImg from '../assets/images/CapeTownETC_1280x720-1024x576.png';
+import tourCrowdImg from '../assets/images/S003_Tour_SC_6604.jpg';
+import unsplashAudienceImg from '../assets/images/unsplash-image-uf2nnANWa8Q.webp';
 
 const STORAGE_KEY_PREFIX = 'nexora_db_v3_';
 
@@ -432,6 +440,342 @@ const INITIAL_EVENTS: Event[] = [
     currency: 'ZAR',
     minPriceMinor: 25000,
   },
+  {
+    id: 'evt-kirstenbosch-amapiano-gala-2026',
+    slug: 'kirstenbosch-sunset-amapiano-orchestra-2026',
+    title: 'Kirstenbosch Sunset Amapiano Orchestral Gala',
+    category: 'Concerts & Music',
+    format: 'in_person',
+    description: `A sold-out monumental collaboration between the Cape Town Philharmonic Orchestra and premier African electronic producers at the world-famous Kirstenbosch Botanical Gardens.\n\nPerforming reimagined symphonic arrangements of iconic Amapiano compositions at golden hour against the eastern slopes of Table Mountain. Every tier has reached strict venue fire capacity. Join the waitlist to be automatically alerted if production holds or refunded tickets are released.`,
+    shortSummary: 'SOLD OUT: 60-piece symphony orchestra meets modern African electronic beats.',
+    coverImage: festivalGuideImg,
+    gallery: [festivalGuideImg, heroFestivalImg],
+    startDate: '2026-11-21T16:00:00Z',
+    endDate: '2026-11-21T21:30:00Z',
+    timezone: 'Africa/Johannesburg',
+    venue: {
+      name: 'Kirstenbosch National Botanical Gardens Amphitheatre',
+      address: 'Rhodes Drive, Newlands',
+      city: 'Cape Town',
+      country: 'South Africa',
+      postalCode: '7735',
+      coordinates: { lat: -33.9875, lng: 18.4326 },
+    },
+    organizer: {
+      id: 'org-cape-vibes',
+      name: 'Cape Town Vibes Live Ltd',
+      verified: true,
+      rating: 5.0,
+      bio: 'Leading premier live music and festival curator in Southern Africa.',
+    },
+    tickets: [
+      {
+        id: 'tier-kb-lawn',
+        eventId: 'evt-kirstenbosch-amapiano-gala-2026',
+        name: 'Botanical Lawn General Admission',
+        description: 'Open lawn picnic seating with full acoustic amphitheatre sightlines.',
+        priceMinor: 48000, // R480.00
+        currency: 'ZAR',
+        capacity: 2200,
+        remaining: 0,
+        minPerOrder: 1,
+        maxPerOrder: 4,
+        salesStart: '2026-07-01T00:00:00Z',
+        salesEnd: '2026-11-21T14:00:00Z',
+        status: 'sold_out',
+      },
+      {
+        id: 'tier-kb-golden',
+        eventId: 'evt-kirstenbosch-amapiano-gala-2026',
+        name: 'Golden Circle Terrace & Wine Reserve',
+        description: 'Prime front terrace tier, estate wine tasting box, and dedicated gate hospitality lane.',
+        priceMinor: 95000, // R950.00
+        currency: 'ZAR',
+        capacity: 400,
+        remaining: 0,
+        minPerOrder: 1,
+        maxPerOrder: 2,
+        salesStart: '2026-07-01T00:00:00Z',
+        salesEnd: '2026-11-21T14:00:00Z',
+        status: 'sold_out',
+      },
+    ],
+    status: 'published',
+    featured: true,
+    ageRestriction: 'All ages welcome. Children under 6 free on lap.',
+    refundPolicy: 'Non-refundable within 14 days of performance.',
+    tags: ['Amapiano', 'Symphony', 'Sold Out', 'Cape Town', 'Outdoor'],
+    currency: 'ZAR',
+    minPriceMinor: 48000,
+    capacityCap: 2600,
+  },
+];
+
+const INITIAL_WAITLIST_ENTRIES: WaitlistEntry[] = [
+  {
+    id: 'wait-1',
+    eventId: 'evt-kirstenbosch-amapiano-gala-2026',
+    eventTitle: 'Kirstenbosch Sunset Amapiano Orchestral Gala',
+    email: 'siphesihle.khumalo@gmail.com',
+    name: 'Siphesihle Khumalo',
+    tierId: 'tier-kb-golden',
+    tierName: 'Golden Circle Terrace & Wine Reserve',
+    joinedAt: '2026-10-18T10:14:00Z',
+    status: 'waiting',
+    position: 1,
+    phone: '+27 82 555 1928'
+  },
+  {
+    id: 'wait-2',
+    eventId: 'evt-kirstenbosch-amapiano-gala-2026',
+    eventTitle: 'Kirstenbosch Sunset Amapiano Orchestral Gala',
+    email: 'tariq.ben@outlook.com',
+    name: 'Tariq Ben-Youssef',
+    tierId: 'tier-kb-lawn',
+    tierName: 'Botanical Lawn General Admission',
+    joinedAt: '2026-10-18T11:30:00Z',
+    status: 'waiting',
+    position: 2,
+    phone: '+27 83 400 9912'
+  },
+  {
+    id: 'wait-3',
+    eventId: 'evt-kirstenbosch-amapiano-gala-2026',
+    eventTitle: 'Kirstenbosch Sunset Amapiano Orchestral Gala',
+    email: 'amara.okafor@lagostech.ng',
+    name: 'Amara Okafor',
+    tierId: 'tier-kb-lawn',
+    tierName: 'Botanical Lawn General Admission',
+    joinedAt: '2026-10-18T13:45:00Z',
+    status: 'waiting',
+    position: 3,
+    phone: '+234 803 111 2233'
+  },
+  {
+    id: 'wait-4',
+    eventId: 'evt-lagos-gastronomy-2026',
+    eventTitle: 'Lagos Waterfront Gastronomy & Wine Soirée',
+    email: 'kofi.mensah@accraventures.gh',
+    name: 'Kofi Mensah',
+    tierId: 'tier-ng-single',
+    tierName: 'Single Guest Experience',
+    joinedAt: '2026-10-19T02:15:00Z',
+    status: 'waiting',
+    position: 1,
+    phone: '+233 24 555 8899'
+  }
+];
+
+const INITIAL_WRISTBANDS: CashlessWristband[] = [
+  {
+    id: 'wb-1',
+    uid: 'NFC-4A:9B:C2:11',
+    attendeeEmail: 'nomvula.dlamini@example.com',
+    attendeeName: 'Nomvula Dlamini',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    balanceMinor: 75000,
+    currency: 'ZAR',
+    status: 'active',
+    pinRequired: false,
+    lastTappedAt: '2026-10-19T05:20:00Z',
+    transactions: [
+      {
+        id: 'wtx-1',
+        type: 'topup',
+        amountMinor: 100000,
+        vendorName: 'M-Pesa / Card Gateway',
+        timestamp: '2026-10-19T04:10:00Z',
+        balanceAfterMinor: 100000
+      },
+      {
+        id: 'wtx-2',
+        type: 'purchase',
+        amountMinor: 25000,
+        vendorName: 'Garden Stage Craft Bar',
+        timestamp: '2026-10-19T05:20:00Z',
+        balanceAfterMinor: 75000
+      }
+    ]
+  },
+  {
+    id: 'wb-2',
+    uid: 'NFC-8D:1C:5E:77',
+    attendeeEmail: 'kofi.mensah@accraventures.gh',
+    attendeeName: 'Kofi Mensah',
+    eventId: 'evt-africa-tech-summit-2026',
+    eventTitle: 'Africa Tech Innovation Summit 2026',
+    balanceMinor: 120000,
+    currency: 'KES',
+    status: 'active',
+    pinRequired: true,
+    lastTappedAt: '2026-10-19T04:45:00Z',
+    transactions: [
+      {
+        id: 'wtx-3',
+        type: 'topup',
+        amountMinor: 150000,
+        vendorName: 'M-Pesa Express (Daraja)',
+        timestamp: '2026-10-19T03:30:00Z',
+        balanceAfterMinor: 150000
+      },
+      {
+        id: 'wtx-4',
+        type: 'purchase',
+        amountMinor: 30000,
+        vendorName: 'Vanguard VIP Barista Lounge',
+        timestamp: '2026-10-19T04:45:00Z',
+        balanceAfterMinor: 120000
+      }
+    ]
+  }
+];
+
+const INITIAL_COMMUNITY_HIGHLIGHTS: CommunityHighlight[] = [
+  {
+    id: 'pulse-1',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    authorName: 'Nomvula Dlamini',
+    authorHandle: '@nomvula_vibes',
+    authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    roleBadge: 'VIP Deck Passholder',
+    platform: 'instagram',
+    imageUrl: heroFestivalImg,
+    aspectRatio: 'portrait',
+    quote: 'Unbelievable energy under Table Mountain! Entering with the offline Ed25519 QR pass took literally 2 seconds at Gate 2. Amapiano live symphony is something else. ✨🇿🇦',
+    rating: 5,
+    likesCount: 184,
+    userLiked: true,
+    timestamp: '2 hours ago',
+    city: 'Cape Town'
+  },
+  {
+    id: 'pulse-2',
+    eventId: 'evt-africa-tech-summit-2026',
+    eventTitle: 'Africa Tech Innovation Summit 2026',
+    authorName: 'Kofi Mensah',
+    authorHandle: '@kofi_fintech',
+    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+    roleBadge: 'Keynote Delegate',
+    platform: 'x',
+    imageUrl: techSummitImg,
+    aspectRatio: 'square',
+    quote: 'The energy in Nairobi this week is unmatched. Closed two venture syndicate talks before lunch. Seamless badge check-in with NFC tap on my phone.',
+    rating: 5,
+    likesCount: 98,
+    userLiked: false,
+    timestamp: '5 hours ago',
+    city: 'Nairobi'
+  },
+  {
+    id: 'pulse-3',
+    eventId: 'evt-lagos-gastronomy-2026',
+    eventTitle: 'Lagos Waterfront Gastronomy & Wine Soirée',
+    authorName: 'Amina Bello',
+    authorHandle: '@amina_eats',
+    authorAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+    roleBadge: "Chef's Table Guest",
+    platform: 'instagram',
+    imageUrl: culinaryWineImg,
+    aspectRatio: 'tall',
+    quote: '7-course tasting on the Victoria Island lagoon. The suya-crusted wagyu paired with Stellenbosch Pinotage was pure poetry. Flawless ticketing experience!',
+    rating: 5,
+    likesCount: 245,
+    userLiked: false,
+    timestamp: 'Yesterday',
+    city: 'Lagos'
+  },
+  {
+    id: 'pulse-4',
+    eventId: 'evt-joburg-art-biennale-2026',
+    eventTitle: 'Johannesburg Contemporary Art Vernissage',
+    authorName: 'Lerato Khumalo',
+    authorHandle: '@lerato_contemporary',
+    authorAvatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
+    roleBadge: 'Art Collector Pass',
+    platform: 'instagram',
+    imageUrl: artExhibitImg,
+    aspectRatio: 'square',
+    quote: 'Keyes Art Mile alive with Pan-African visionaries. Curators gave an intimate walkthrough before doors opened. Super proud of Southern African talent!',
+    rating: 5,
+    likesCount: 76,
+    userLiked: false,
+    timestamp: '1 day ago',
+    city: 'Johannesburg'
+  },
+  {
+    id: 'pulse-5',
+    eventId: 'evt-kirstenbosch-amapiano-gala-2026',
+    eventTitle: 'Kirstenbosch Sunset Amapiano Gala',
+    authorName: 'Tariq Ben-Youssef',
+    authorHandle: '@tariq_tunes',
+    authorAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+    roleBadge: 'Waitlist Wave 1 Claimed',
+    platform: 'tiktok',
+    imageUrl: festivalGuideImg,
+    aspectRatio: 'tall',
+    quote: 'I was #12 on the Nexora waitlist when extra tickets dropped at 10am. Got instant alert and secured two front-row passes. Best night of 2026!',
+    rating: 5,
+    likesCount: 312,
+    userLiked: true,
+    timestamp: '2 days ago',
+    city: 'Cape Town'
+  },
+  {
+    id: 'pulse-6',
+    eventId: 'evt-cape-town-vibes-2026',
+    eventTitle: 'Cape Town Vibes Festival 2026',
+    authorName: 'Zanele Sithole',
+    authorHandle: '@zanele_sound',
+    authorAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
+    roleBadge: 'Verified Passholder',
+    platform: 'instagram',
+    imageUrl: rockingDaisiesImg,
+    aspectRatio: 'portrait',
+    quote: 'The sound engineering on the Garden Stage was immaculate. Cashless wristband integration worked without a hitch all night long.',
+    rating: 5,
+    likesCount: 184,
+    userLiked: false,
+    timestamp: '3 days ago',
+    city: 'Cape Town'
+  },
+  {
+    id: 'pulse-7',
+    eventId: 'evt-africa-tech-summit-2026',
+    eventTitle: 'Africa Tech Innovation Summit 2026',
+    authorName: 'David Mwangi',
+    authorHandle: '@david_founder',
+    authorAvatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&auto=format&fit=crop&q=80',
+    roleBadge: 'Founder Pass',
+    platform: 'x',
+    imageUrl: unsplashAudienceImg,
+    aspectRatio: 'square',
+    quote: 'Met 40+ founders across East & West Africa. The hybrid livestream also let our London engineering team participate in real-time.',
+    rating: 5,
+    likesCount: 129,
+    userLiked: false,
+    timestamp: '3 days ago',
+    city: 'Nairobi'
+  },
+  {
+    id: 'pulse-8',
+    eventId: 'evt-lagos-gastronomy-2026',
+    eventTitle: 'Lagos Waterfront Gastronomy & Wine Soirée',
+    authorName: 'Chinedu Okafor',
+    authorHandle: '@chinedu_lifestyle',
+    authorAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80',
+    roleBadge: 'VIP Patron',
+    platform: 'instagram',
+    imageUrl: capeTownEtcImg,
+    aspectRatio: 'portrait',
+    quote: 'Lagos nightlife perfected. The waterfront terrace views + live saxophone accompaniment created an atmosphere like no other.',
+    rating: 5,
+    likesCount: 167,
+    userLiked: false,
+    timestamp: '4 days ago',
+    city: 'Lagos'
+  }
 ];
 
 const INITIAL_PROMO_CODES: PromoCode[] = [
@@ -1400,415 +1744,9 @@ export const INITIAL_PLATFORM_USERS: AuthUser[] = [
   },
 ];
 
-export const INITIAL_SAMPLE_ORDERS: Order[] = [
-  {
-    id: 'ord-nomvula-1',
-    orderReference: 'NX-948210',
-    customerName: 'Nomvula Dlamini',
-    customerEmail: 'nomvula.dlamini@example.com',
-    customerPhone: '+27 82 491 0293',
-    eventId: 'evt-cape-town-vibes-2026',
-    eventTitle: 'Cape Town Vibes Festival 2026',
-    items: [
-      {
-        tierId: 'tier-ct-early',
-        tierName: 'General Admission — Phase 1',
-        quantity: 2,
-        unitPriceMinor: 35000,
-        totalPriceMinor: 70000,
-      }
-    ],
-    subtotalMinor: 70000,
-    feeMinor: 2450,
-    discountMinor: 0,
-    taxMinor: 0,
-    totalMinor: 72450,
-    currency: 'ZAR',
-    paymentStatus: 'succeeded',
-    paymentMethod: 'Credit Card (3D-Secure)',
-    paymentProvider: 'paystack',
-    transactionReference: 'PSTK_TXN_948102948',
-    createdAt: '2026-09-15T14:20:00Z',
-    expiresAt: '2026-09-15T14:35:00Z',
-  },
-  {
-    id: 'ord-nomvula-2',
-    orderReference: 'NX-481920',
-    customerName: 'Nomvula Dlamini',
-    customerEmail: 'nomvula.dlamini@example.com',
-    customerPhone: '+27 82 491 0293',
-    eventId: 'evt-joburg-art-biennale-2026',
-    eventTitle: 'Johannesburg Contemporary Art Biennale 2026',
-    items: [
-      {
-        tierId: 'tier-joburg-vip',
-        tierName: 'Patron Gala & Preview Pass',
-        quantity: 1,
-        unitPriceMinor: 45000,
-        totalPriceMinor: 45000,
-      }
-    ],
-    subtotalMinor: 45000,
-    feeMinor: 1575,
-    discountMinor: 0,
-    taxMinor: 0,
-    totalMinor: 46575,
-    currency: 'ZAR',
-    paymentStatus: 'succeeded',
-    paymentMethod: 'Instant EFT',
-    paymentProvider: 'ozow',
-    transactionReference: 'OZOW_REF_849201948',
-    createdAt: '2026-10-02T10:15:00Z',
-    expiresAt: '2026-10-02T10:30:00Z',
-  },
-  {
-    id: 'ord-chidi-1',
-    orderReference: 'NX-610294',
-    customerName: 'Chidi Okafor',
-    customerEmail: 'chidi.okafor@lagostechhub.ng',
-    customerPhone: '+234 803 291 8402',
-    eventId: 'evt-lagos-gastronomy-2026',
-    eventTitle: 'Eko International Gastronomy & Wine Showcase',
-    items: [
-      {
-        tierId: 'tier-lagos-tasting',
-        tierName: 'Chef Tasting Pavilion Pass',
-        quantity: 2,
-        unitPriceMinor: 2500000,
-        totalPriceMinor: 5000000,
-      }
-    ],
-    subtotalMinor: 5000000,
-    feeMinor: 175000,
-    discountMinor: 0,
-    taxMinor: 0,
-    totalMinor: 5175000,
-    currency: 'NGN',
-    paymentStatus: 'succeeded',
-    paymentMethod: 'NGN Direct Bank Transfer',
-    paymentProvider: 'flutterwave',
-    transactionReference: 'FLW_NGN_77491029',
-    createdAt: '2026-09-28T16:45:00Z',
-    expiresAt: '2026-09-28T17:00:00Z',
-  },
-  {
-    id: 'ord-kofi-1',
-    orderReference: 'NX-882019',
-    customerName: 'Kofi Mensah',
-    customerEmail: 'kofi.mensah@accraaccords.com',
-    customerPhone: '+233 24 551 0928',
-    eventId: 'evt-africa-tech-summit-2026',
-    eventTitle: 'Africa Tech Vanguard Summit 2026',
-    items: [
-      {
-        tierId: 'tier-ats-standard',
-        tierName: 'Standard Delegate Pass',
-        quantity: 1,
-        unitPriceMinor: 1200000,
-        totalPriceMinor: 1200000,
-      }
-    ],
-    subtotalMinor: 1200000,
-    feeMinor: 42000,
-    discountMinor: 0,
-    taxMinor: 0,
-    totalMinor: 1242000,
-    currency: 'KES',
-    paymentStatus: 'succeeded',
-    paymentMethod: 'M-Pesa STK Push Express',
-    paymentProvider: 'mpesa',
-    transactionReference: 'MPESA_WS_7491029',
-    createdAt: '2026-10-05T09:12:00Z',
-    expiresAt: '2026-10-05T09:27:00Z',
-  },
-  {
-    id: 'ord-tariq-1',
-    orderReference: 'NX-193821',
-    customerName: 'Tariq Ben-Youssef',
-    customerEmail: 'tariq.passback@darkproxy.net',
-    customerPhone: '+27 76 892 1049',
-    eventId: 'evt-cape-town-vibes-2026',
-    eventTitle: 'Cape Town Vibes Festival 2026',
-    items: [
-      {
-        tierId: 'tier-ct-vip',
-        tierName: 'VIP Terrace Deck',
-        quantity: 4,
-        unitPriceMinor: 85000,
-        totalPriceMinor: 340000,
-      }
-    ],
-    subtotalMinor: 340000,
-    feeMinor: 11900,
-    discountMinor: 0,
-    taxMinor: 0,
-    totalMinor: 351900,
-    currency: 'ZAR',
-    paymentStatus: 'refunded',
-    paymentMethod: 'Card Velocity Probe',
-    paymentProvider: 'paystack',
-    transactionReference: 'PSTK_DISP_66491028',
-    createdAt: '2026-09-12T03:40:00Z',
-    expiresAt: '2026-09-12T03:55:00Z',
-  },
-];
-
-export const INITIAL_SAMPLE_TICKETS: Ticket[] = [
-  {
-    id: 'tkt-nomvula-1',
-    ticketCode: 'NX-TKT-94821',
-    token: 'tok_nomvula_ctv_01',
-    orderId: 'ord-nomvula-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    eventTitle: 'Cape Town Vibes Festival 2026',
-    eventDate: '2026-11-14T14:00:00Z',
-    eventVenue: 'Green Point Amphitheatre, Cape Town',
-    tierId: 'tier-ct-early',
-    tierName: 'General Admission — Phase 1',
-    attendeeName: 'Nomvula Dlamini',
-    attendeeEmail: 'nomvula.dlamini@example.com',
-    attendeePhone: '+27 82 491 0293',
-    priceMinor: 35000,
-    currency: 'ZAR',
-    status: 'valid',
-    qrPayload: JSON.stringify({
-      code: 'NX-TKT-94821',
-      eventId: 'evt-cape-town-vibes-2026',
-      token: 'tok_nomvula_ctv_01',
-      tier: 'General Admission — Phase 1',
-      attendee: 'Nomvula Dlamini',
-    }),
-  },
-  {
-    id: 'tkt-nomvula-2',
-    ticketCode: 'NX-TKT-94822',
-    token: 'tok_nomvula_ctv_02',
-    orderId: 'ord-nomvula-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    eventTitle: 'Cape Town Vibes Festival 2026',
-    eventDate: '2026-11-14T14:00:00Z',
-    eventVenue: 'Green Point Amphitheatre, Cape Town',
-    tierId: 'tier-ct-early',
-    tierName: 'General Admission — Phase 1',
-    attendeeName: 'Nomvula Dlamini (Guest)',
-    attendeeEmail: 'nomvula.dlamini@example.com',
-    attendeePhone: '+27 82 491 0293',
-    priceMinor: 35000,
-    currency: 'ZAR',
-    status: 'valid',
-    qrPayload: JSON.stringify({
-      code: 'NX-TKT-94822',
-      eventId: 'evt-cape-town-vibes-2026',
-      token: 'tok_nomvula_ctv_02',
-      tier: 'General Admission — Phase 1',
-      attendee: 'Nomvula Dlamini (Guest)',
-    }),
-  },
-  {
-    id: 'tkt-nomvula-3',
-    ticketCode: 'NX-TKT-48192',
-    token: 'tok_nomvula_jb_01',
-    orderId: 'ord-nomvula-2',
-    eventId: 'evt-joburg-art-biennale-2026',
-    eventTitle: 'Johannesburg Contemporary Art Biennale 2026',
-    eventDate: '2026-10-24T18:00:00Z',
-    eventVenue: 'Turbine Hall, Newtown, Johannesburg',
-    tierId: 'tier-joburg-vip',
-    tierName: 'Patron Gala & Preview Pass',
-    attendeeName: 'Nomvula Dlamini',
-    attendeeEmail: 'nomvula.dlamini@example.com',
-    attendeePhone: '+27 82 491 0293',
-    priceMinor: 45000,
-    currency: 'ZAR',
-    status: 'valid',
-    qrPayload: JSON.stringify({
-      code: 'NX-TKT-48192',
-      eventId: 'evt-joburg-art-biennale-2026',
-      token: 'tok_nomvula_jb_01',
-      tier: 'Patron Gala & Preview Pass',
-      attendee: 'Nomvula Dlamini',
-    }),
-  },
-  {
-    id: 'tkt-chidi-1',
-    ticketCode: 'NX-TKT-61029',
-    token: 'tok_chidi_eko_01',
-    orderId: 'ord-chidi-1',
-    eventId: 'evt-lagos-gastronomy-2026',
-    eventTitle: 'Eko International Gastronomy & Wine Showcase',
-    eventDate: '2026-12-05T12:00:00Z',
-    eventVenue: 'Federal Palace Hotel & Casino, Victoria Island, Lagos',
-    tierId: 'tier-lagos-tasting',
-    tierName: 'Chef Tasting Pavilion Pass',
-    attendeeName: 'Chidi Okafor',
-    attendeeEmail: 'chidi.okafor@lagostechhub.ng',
-    attendeePhone: '+234 803 291 8402',
-    priceMinor: 2500000,
-    currency: 'NGN',
-    status: 'valid',
-    qrPayload: JSON.stringify({
-      code: 'NX-TKT-61029',
-      eventId: 'evt-lagos-gastronomy-2026',
-      token: 'tok_chidi_eko_01',
-      tier: 'Chef Tasting Pavilion Pass',
-      attendee: 'Chidi Okafor',
-    }),
-  },
-  {
-    id: 'tkt-kofi-1',
-    ticketCode: 'NX-TKT-88201',
-    token: 'tok_kofi_ats_01',
-    orderId: 'ord-kofi-1',
-    eventId: 'evt-africa-tech-summit-2026',
-    eventTitle: 'Africa Tech Vanguard Summit 2026',
-    eventDate: '2026-10-18T08:30:00Z',
-    eventVenue: 'Sarit Expo Centre, Westlands, Nairobi',
-    tierId: 'tier-ats-standard',
-    tierName: 'Standard Delegate Pass',
-    attendeeName: 'Kofi Mensah',
-    attendeeEmail: 'kofi.mensah@accraaccords.com',
-    attendeePhone: '+233 24 551 0928',
-    priceMinor: 1200000,
-    currency: 'KES',
-    status: 'valid',
-    qrPayload: JSON.stringify({
-      code: 'NX-TKT-88201',
-      eventId: 'evt-africa-tech-summit-2026',
-      token: 'tok_kofi_ats_01',
-      tier: 'Standard Delegate Pass',
-      attendee: 'Kofi Mensah',
-    }),
-  },
-  {
-    id: 'tkt-tariq-1',
-    ticketCode: 'NX-TKT-19382',
-    token: 'tok_tariq_revoked_01',
-    orderId: 'ord-tariq-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    eventTitle: 'Cape Town Vibes Festival 2026',
-    eventDate: '2026-11-14T14:00:00Z',
-    eventVenue: 'Green Point Amphitheatre, Cape Town',
-    tierId: 'tier-ct-vip',
-    tierName: 'VIP Terrace Deck',
-    attendeeName: 'Tariq Ben-Youssef',
-    attendeeEmail: 'tariq.passback@darkproxy.net',
-    attendeePhone: '+27 76 892 1049',
-    priceMinor: 85000,
-    currency: 'ZAR',
-    status: 'refunded',
-    refundReason: 'Chargeback dispute filed via banking card network',
-    qrPayload: JSON.stringify({
-      code: 'NX-TKT-19382',
-      eventId: 'evt-cape-town-vibes-2026',
-      token: 'tok_tariq_revoked_01',
-      status: 'refunded',
-    }),
-  },
-];
-
-export const INITIAL_SAMPLE_LEDGER: LedgerEntry[] = [
-  // Order 1 (Nomvula Dlamini - ZAR 72,450)
-  {
-    id: 'led-nomvula-1a',
-    orderId: 'ord-nomvula-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'customer_clearing',
-    debitMinor: 72450,
-    creditMinor: 0,
-    currency: 'ZAR',
-    description: 'Paystack Settlement: Customer payment received for Order NX-948210 (Nomvula Dlamini)',
-    timestamp: '2026-09-15T14:20:00Z',
-  },
-  {
-    id: 'led-nomvula-1b',
-    orderId: 'ord-nomvula-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'organizer_payable',
-    debitMinor: 0,
-    creditMinor: 70000,
-    currency: 'ZAR',
-    description: 'Escrow Reserve: Ticket proceeds allocated to Cape Town Vibes Live Ltd',
-    timestamp: '2026-09-15T14:20:00Z',
-  },
-  {
-    id: 'led-nomvula-1c',
-    orderId: 'ord-nomvula-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'platform_commission',
-    debitMinor: 0,
-    creditMinor: 2450,
-    currency: 'ZAR',
-    description: 'Nexora Booking Fee & Commission (3.5%)',
-    timestamp: '2026-09-15T14:20:00Z',
-  },
-
-  // Order 2 (Nomvula Dlamini - ZAR 46,575)
-  {
-    id: 'led-nomvula-2a',
-    orderId: 'ord-nomvula-2',
-    eventId: 'evt-joburg-art-biennale-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'customer_clearing',
-    debitMinor: 46575,
-    creditMinor: 0,
-    currency: 'ZAR',
-    description: 'Ozow Instant EFT Clearing: Order NX-481920 (Nomvula Dlamini)',
-    timestamp: '2026-10-02T10:15:00Z',
-  },
-  {
-    id: 'led-nomvula-2b',
-    orderId: 'ord-nomvula-2',
-    eventId: 'evt-joburg-art-biennale-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'organizer_payable',
-    debitMinor: 0,
-    creditMinor: 45000,
-    currency: 'ZAR',
-    description: 'Art Biennale Ticket Escrow Proceeds Payable',
-    timestamp: '2026-10-02T10:15:00Z',
-  },
-  {
-    id: 'led-nomvula-2c',
-    orderId: 'ord-nomvula-2',
-    eventId: 'evt-joburg-art-biennale-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'platform_commission',
-    debitMinor: 0,
-    creditMinor: 1575,
-    currency: 'ZAR',
-    description: 'Nexora Platform Convenience Fee',
-    timestamp: '2026-10-02T10:15:00Z',
-  },
-
-  // Order 4 Dispute Reversal (Tariq Ben-Youssef - ZAR 351,900)
-  {
-    id: 'led-tariq-1a',
-    orderId: 'ord-tariq-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'refund_reserve',
-    debitMinor: 351900,
-    creditMinor: 0,
-    currency: 'ZAR',
-    description: 'Chargeback Reversal: Order NX-193821 (Tariq Ben-Youssef)',
-    timestamp: '2026-09-12T04:10:00Z',
-  },
-  {
-    id: 'led-tariq-1b',
-    orderId: 'ord-tariq-1',
-    eventId: 'evt-cape-town-vibes-2026',
-    organizerId: 'org-cape-vibes',
-    type: 'refund_reversal',
-    debitMinor: 0,
-    creditMinor: 351900,
-    currency: 'ZAR',
-    description: 'Bank Chargeback Settlement Clearing debited to merchant reserve',
-    timestamp: '2026-09-12T04:10:00Z',
-  },
-];
+export const INITIAL_SAMPLE_ORDERS: Order[] = [];
+export const INITIAL_SAMPLE_TICKETS: Ticket[] = [];
+export const INITIAL_SAMPLE_LEDGER: LedgerEntry[] = [];
 
 class NexoraStore {
   private events: Event[] = [];
@@ -1831,6 +1769,9 @@ class NexoraStore {
   private integrations: Record<string, ThirdPartyIntegration[]> = {};
   private customWebhooks: Record<string, CustomWebhookEndpoint[]> = {};
   private webhookDeliveryLogs: Record<string, WebhookDeliveryLog[]> = {};
+  private waitlist: WaitlistEntry[] = [];
+  private communityHighlights: CommunityHighlight[] = [];
+  private wristbands: CashlessWristband[] = [];
   private userRole: 'attendee' | 'organizer' | 'scanner' | 'admin' = 'organizer';
   private selectedCurrency = 'ZAR';
   private currentUser: AuthUser | null = null;
@@ -1841,24 +1782,39 @@ class NexoraStore {
 
   private init() {
     this.events = loadFromStorage('events', INITIAL_EVENTS);
+    // Ensure sold out event is included for testing
+    if (!this.events.some(e => e.id === 'evt-kirstenbosch-amapiano-gala-2026')) {
+      const soldOutEvent = INITIAL_EVENTS.find(e => e.id === 'evt-kirstenbosch-amapiano-gala-2026');
+      if (soldOutEvent) {
+        this.events = [soldOutEvent, ...this.events];
+        saveToStorage('events', this.events);
+      }
+    }
+
     this.organizers = loadFromStorage('organizers', INITIAL_ORGANIZERS);
     this.promoCodes = loadFromStorage('promos', INITIAL_PROMO_CODES);
-    this.orders = loadFromStorage('orders', INITIAL_SAMPLE_ORDERS);
-    if (!this.orders || this.orders.length === 0) {
-      this.orders = INITIAL_SAMPLE_ORDERS;
-      saveToStorage('orders', this.orders);
+    // Purge mock telemetry and transaction data to clean zero baseline
+    if (typeof window !== 'undefined') {
+      try {
+        if (localStorage.getItem('nexora_zero_baseline_purged_v3') !== 'true') {
+          localStorage.removeItem('orders');
+          localStorage.removeItem('tickets');
+          localStorage.removeItem('ledger');
+          localStorage.removeItem('webhooks');
+          localStorage.removeItem('checkins');
+          localStorage.removeItem('payouts');
+          localStorage.removeItem('refunds');
+          localStorage.setItem('nexora_zero_baseline_purged_v3', 'true');
+        }
+      } catch {
+        // Ignore
+      }
     }
-    this.tickets = loadFromStorage('tickets', INITIAL_SAMPLE_TICKETS);
-    if (!this.tickets || this.tickets.length === 0) {
-      this.tickets = INITIAL_SAMPLE_TICKETS;
-      saveToStorage('tickets', this.tickets);
-    }
+
+    this.orders = loadFromStorage('orders', []);
+    this.tickets = loadFromStorage('tickets', []);
     this.checkIns = loadFromStorage('checkins', []);
-    this.ledger = loadFromStorage('ledger', INITIAL_SAMPLE_LEDGER);
-    if (!this.ledger || this.ledger.length === 0) {
-      this.ledger = INITIAL_SAMPLE_LEDGER;
-      saveToStorage('ledger', this.ledger);
-    }
+    this.ledger = loadFromStorage('ledger', []);
     this.platformUsers = loadFromStorage('platform_users', INITIAL_PLATFORM_USERS);
     if (!this.platformUsers || this.platformUsers.length === 0) {
       this.platformUsers = INITIAL_PLATFORM_USERS;
@@ -1874,6 +1830,9 @@ class NexoraStore {
     this.priorityTasks = loadFromStorage('tasks', INITIAL_PRIORITY_TASKS);
     this.activityFeed = loadFromStorage('activity', INITIAL_ACTIVITY_FEED);
     this.selectedCurrency = loadFromStorage('currency', 'ZAR');
+    this.waitlist = loadFromStorage('waitlist', INITIAL_WAITLIST_ENTRIES);
+    this.communityHighlights = loadFromStorage('community_highlights', INITIAL_COMMUNITY_HIGHLIGHTS);
+    this.wristbands = loadFromStorage('wristbands', INITIAL_WRISTBANDS);
     this.currentUser = loadFromStorage<AuthUser | null>('auth_user', {
       id: 'usr-thabo',
       name: 'Thabo Mokoena',
@@ -3288,6 +3247,392 @@ class NexoraStore {
     const orderIds = new Set(userOrders.map(o => o.id));
     return this.ledger.filter(l => (l.orderId && orderIds.has(l.orderId)));
   }
+
+  // ==========================================
+  // WAITLIST MANAGEMENT
+  // ==========================================
+  public getWaitlist(): WaitlistEntry[] {
+    return [...this.waitlist];
+  }
+
+  public getWaitlistForEvent(eventId: string): WaitlistEntry[] {
+    return this.waitlist.filter(w => w.eventId === eventId);
+  }
+
+  public isOnWaitlist(eventId: string, email: string): boolean {
+    if (!email) return false;
+    const lower = email.trim().toLowerCase();
+    return this.waitlist.some(w => w.eventId === eventId && w.email.trim().toLowerCase() === lower);
+  }
+
+  public joinWaitlist(params: {
+    eventId: string;
+    eventTitle: string;
+    email: string;
+    name?: string;
+    tierId?: string;
+    tierName?: string;
+    phone?: string;
+  }): { success: boolean; entry: WaitlistEntry; message: string; isNew: boolean } {
+    const cleanEmail = params.email.trim().toLowerCase();
+    
+    // Check if already registered on waitlist for this event
+    const existing = this.waitlist.find(
+      w => w.eventId === params.eventId && w.email.trim().toLowerCase() === cleanEmail
+    );
+
+    if (existing) {
+      return {
+        success: true,
+        entry: existing,
+        message: `You are already registered on the waitlist at position #${existing.position}.`,
+        isNew: false
+      };
+    }
+
+    const eventWaitlist = this.waitlist.filter(w => w.eventId === params.eventId);
+    const nextPosition = eventWaitlist.length + 1;
+
+    const newEntry: WaitlistEntry = {
+      id: 'wait-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      eventId: params.eventId,
+      eventTitle: params.eventTitle,
+      email: cleanEmail,
+      name: params.name?.trim() || cleanEmail.split('@')[0],
+      tierId: params.tierId,
+      tierName: params.tierName,
+      phone: params.phone,
+      joinedAt: new Date().toISOString(),
+      status: 'waiting',
+      position: nextPosition
+    };
+
+    this.waitlist = [newEntry, ...this.waitlist];
+    saveToStorage('waitlist', this.waitlist);
+
+    this.logActivity({
+      type: 'purchase',
+      title: 'Attendee Joined Waitlist',
+      description: `${newEntry.name} (${cleanEmail}) joined waitlist for ${params.eventTitle} (Position #${nextPosition})`,
+      actor: newEntry.name || 'Attendee'
+    });
+
+    return {
+      success: true,
+      entry: newEntry,
+      message: `You've joined the waitlist at position #${nextPosition}! We'll email you immediately if tickets become available.`,
+      isNew: true
+    };
+  }
+
+  // ==========================================
+  // COMMUNITY PULSE HIGHLIGHTS
+  // ==========================================
+  public getCommunityHighlights(): CommunityHighlight[] {
+    return [...this.communityHighlights];
+  }
+
+  public likeCommunityHighlight(id: string): CommunityHighlight | null {
+    const item = this.communityHighlights.find(h => h.id === id);
+    if (!item) return null;
+
+    const userLiked = !item.userLiked;
+    const likesCount = userLiked ? item.likesCount + 1 : Math.max(0, item.likesCount - 1);
+
+    item.userLiked = userLiked;
+    item.likesCount = likesCount;
+
+    saveToStorage('community_highlights', this.communityHighlights);
+    return { ...item };
+  }
+
+  // ==========================================
+  // WAITLIST RECLAMATION AUTOMATION ENGINE
+  // ==========================================
+  public triggerWaitlistReclamation(eventId: string, ticketCount: number = 1): {
+    reclaimed: WaitlistEntry[];
+    message: string;
+  } {
+    const event = this.getEventById(eventId);
+    const waitingEntries = this.waitlist
+      .filter(w => w.eventId === eventId && w.status === 'waiting')
+      .sort((a, b) => a.position - b.position);
+
+    if (waitingEntries.length === 0) {
+      return {
+        reclaimed: [],
+        message: 'No attendees currently waiting in queue for this event.'
+      };
+    }
+
+    const toNotify = waitingEntries.slice(0, ticketCount);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours
+
+    toNotify.forEach(entry => {
+      const claimToken = 'CLAIM-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-' + Date.now().toString(36).slice(-3).toUpperCase();
+      entry.status = 'notified';
+      entry.claimToken = claimToken;
+      entry.notifiedAt = now.toISOString();
+      entry.claimExpiresAt = expiresAt.toISOString();
+      entry.notificationDispatchLog = {
+        emailSent: true,
+        smsSent: Boolean(entry.phone),
+        provider: 'SendGrid',
+        messageId: 'sg-msg-' + Math.random().toString(36).substring(2, 9)
+      };
+
+      this.logActivity({
+        type: 'purchase',
+        title: 'Waitlist Allocation Released',
+        description: `Exclusive 2-hour claim token issued to ${entry.name} (${entry.email}) for ${event?.title || entry.eventTitle}. Token: ${claimToken}`,
+        actor: 'Waitlist Engine'
+      });
+    });
+
+    saveToStorage('waitlist', this.waitlist);
+
+    return {
+      reclaimed: toNotify,
+      message: `Released ${toNotify.length} exclusive ticket reservation(s) via automated SendGrid/Twilio notification! 2-hour claim window started.`
+    };
+  }
+
+  public claimWaitlistTicket(claimToken: string): {
+    success: boolean;
+    entry?: WaitlistEntry;
+    event?: Event;
+    message: string;
+  } {
+    const entry = this.waitlist.find(w => w.claimToken === claimToken);
+    if (!entry) {
+      return { success: false, message: 'Invalid or expired waitlist claim token.' };
+    }
+
+    if (entry.status === 'claimed') {
+      return { success: false, entry, message: 'This waitlist ticket allocation has already been claimed.' };
+    }
+
+    if (entry.claimExpiresAt && new Date(entry.claimExpiresAt).getTime() < Date.now()) {
+      entry.status = 'expired';
+      saveToStorage('waitlist', this.waitlist);
+      return { success: false, entry, message: 'Your 2-hour waitlist claim window has expired. The ticket rolled over to the next attendee in line.' };
+    }
+
+    const event = this.getEventById(entry.eventId);
+    return {
+      success: true,
+      entry,
+      event,
+      message: 'Waitlist ticket allocation verified! Complete checkout before the countdown timer expires.'
+    };
+  }
+
+  public markWaitlistClaimed(claimToken: string): boolean {
+    const entry = this.waitlist.find(w => w.claimToken === claimToken);
+    if (!entry) return false;
+    entry.status = 'claimed';
+    entry.claimedAt = new Date().toISOString();
+    saveToStorage('waitlist', this.waitlist);
+    return true;
+  }
+
+  public getActiveClaimForUser(email?: string): WaitlistEntry | undefined {
+    if (!email) return undefined;
+    const lower = email.trim().toLowerCase();
+    const now = Date.now();
+    return this.waitlist.find(w => 
+      w.email.trim().toLowerCase() === lower &&
+      w.status === 'notified' &&
+      w.claimExpiresAt &&
+      new Date(w.claimExpiresAt).getTime() > now
+    );
+  }
+
+  // ==========================================
+  // CASHLESS RFID WRISTBAND MANAGEMENT
+  // ==========================================
+  public getCashlessWristbands(): CashlessWristband[] {
+    return [...this.wristbands];
+  }
+
+  public getWristbandByUid(uid: string): CashlessWristband | undefined {
+    return this.wristbands.find(w => w.uid.toLowerCase() === uid.trim().toLowerCase());
+  }
+
+  public getWristbandForAttendee(email: string): CashlessWristband | undefined {
+    const lower = email.trim().toLowerCase();
+    return this.wristbands.find(w => w.attendeeEmail.trim().toLowerCase() === lower);
+  }
+
+  public pairWristband(params: {
+    uid: string;
+    attendeeEmail: string;
+    attendeeName: string;
+    eventId: string;
+    eventTitle: string;
+    initialBalanceMinor?: number;
+    currency?: string;
+  }): CashlessWristband {
+    const existing = this.getWristbandByUid(params.uid);
+    if (existing) {
+      existing.attendeeEmail = params.attendeeEmail;
+      existing.attendeeName = params.attendeeName;
+      existing.eventId = params.eventId;
+      existing.eventTitle = params.eventTitle;
+      saveToStorage('wristbands', this.wristbands);
+      return existing;
+    }
+
+    const newWristband: CashlessWristband = {
+      id: 'wb-' + Date.now().toString(36),
+      uid: params.uid.toUpperCase(),
+      attendeeEmail: params.attendeeEmail,
+      attendeeName: params.attendeeName,
+      eventId: params.eventId,
+      eventTitle: params.eventTitle,
+      balanceMinor: params.initialBalanceMinor || 0,
+      currency: params.currency || 'ZAR',
+      status: 'active',
+      pinRequired: false,
+      lastTappedAt: new Date().toISOString(),
+      transactions: params.initialBalanceMinor ? [{
+        id: 'wtx-' + Date.now().toString(36),
+        type: 'topup',
+        amountMinor: params.initialBalanceMinor,
+        vendorName: 'Initial Cashless Top-up',
+        timestamp: new Date().toISOString(),
+        balanceAfterMinor: params.initialBalanceMinor
+      }] : []
+    };
+
+    this.wristbands = [newWristband, ...this.wristbands];
+    saveToStorage('wristbands', this.wristbands);
+    return newWristband;
+  }
+
+  public topUpWristband(uid: string, amountMinor: number, paymentMethod: string): {
+    success: boolean;
+    wristband?: CashlessWristband;
+    message: string;
+  } {
+    const wb = this.getWristbandByUid(uid);
+    if (!wb) return { success: false, message: 'Wristband UID not recognized.' };
+
+    wb.balanceMinor += amountMinor;
+    wb.lastTappedAt = new Date().toISOString();
+    wb.transactions.unshift({
+      id: 'wtx-' + Date.now().toString(36),
+      type: 'topup',
+      amountMinor,
+      vendorName: `Top-up via ${paymentMethod}`,
+      timestamp: new Date().toISOString(),
+      balanceAfterMinor: wb.balanceMinor
+    });
+
+    saveToStorage('wristbands', this.wristbands);
+
+    this.recordTransaction({
+      type: 'payment',
+      amountMinor,
+      currency: wb.currency,
+      description: `Cashless RFID Wristband Top-up [${wb.uid}] - ${wb.attendeeName} via ${paymentMethod}`,
+      reference: `NFC-TOPUP-${wb.uid}`
+    });
+
+    return {
+      success: true,
+      wristband: { ...wb },
+      message: `Loaded funds onto wristband ${wb.uid} successfully! New balance: ${wb.currency} ${(wb.balanceMinor / 100).toFixed(2)}.`
+    };
+  }
+
+  public chargeWristband(uid: string, amountMinor: number, vendorName: string): {
+    success: boolean;
+    wristband?: CashlessWristband;
+    message: string;
+  } {
+    const wb = this.getWristbandByUid(uid);
+    if (!wb) return { success: false, message: 'Wristband not paired.' };
+    if (wb.status !== 'active') return { success: false, message: `Wristband is ${wb.status}.` };
+    if (wb.balanceMinor < amountMinor) {
+      return { 
+        success: false, 
+        wristband: wb, 
+        message: `Insufficient funds. Balance: ${wb.currency} ${(wb.balanceMinor / 100).toFixed(2)}, Required: ${wb.currency} ${(amountMinor / 100).toFixed(2)}.` 
+      };
+    }
+
+    wb.balanceMinor -= amountMinor;
+    wb.lastTappedAt = new Date().toISOString();
+    wb.transactions.unshift({
+      id: 'wtx-' + Date.now().toString(36),
+      type: 'purchase',
+      amountMinor,
+      vendorName,
+      timestamp: new Date().toISOString(),
+      balanceAfterMinor: wb.balanceMinor
+    });
+
+    saveToStorage('wristbands', this.wristbands);
+
+    this.recordTransaction({
+      type: 'payment',
+      amountMinor,
+      currency: wb.currency,
+      description: `POS Tap Payment at ${vendorName} [${wb.uid}] - ${wb.attendeeName}`,
+      reference: `POS-${wb.uid}-${Date.now().toString(36).slice(-4)}`
+    });
+
+    return {
+      success: true,
+      wristband: { ...wb },
+      message: `Approved! ${wb.currency} ${(amountMinor / 100).toFixed(2)} deducted. New balance: ${wb.currency} ${(wb.balanceMinor / 100).toFixed(2)}.`
+    };
+  }
+
+  public recordTransaction(entry: {
+    type?: string;
+    amountMinor: number;
+    currency: string;
+    description: string;
+    reference: string;
+    organizerId?: string;
+    eventId?: string;
+  }): void {
+    const ledgerItem: LedgerEntry = {
+      id: `led-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      organizerId: entry.organizerId || 'org-afrofuture',
+      eventId: entry.eventId || 'evt-afro-future-fest-2026',
+      type: 'customer_clearing',
+      debitMinor: entry.amountMinor,
+      creditMinor: 0,
+      currency: entry.currency,
+      description: `${entry.description} (Ref: ${entry.reference})`,
+      timestamp: new Date().toISOString()
+    };
+    this.ledger.unshift(ledgerItem);
+    saveToStorage('ledger', this.ledger);
+  }
+
+  public clearPlatformMockData(): void {
+    this.orders = [];
+    this.tickets = [];
+    this.ledger = [];
+    this.webhookLogs = [];
+    this.checkIns = [];
+    this.payouts = [];
+    this.refundRequests = [];
+    saveToStorage('orders', this.orders);
+    saveToStorage('tickets', this.tickets);
+    saveToStorage('ledger', this.ledger);
+    saveToStorage('webhooks', this.webhookLogs);
+    saveToStorage('checkins', this.checkIns);
+    saveToStorage('payouts', this.payouts);
+    saveToStorage('refunds', this.refundRequests);
+  }
 }
 
 export const store = new NexoraStore();
+
+
