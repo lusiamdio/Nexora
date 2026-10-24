@@ -408,7 +408,7 @@ export interface AuthUser {
   email: string;
   role: 'attendee' | 'organizer' | 'admin' | 'support_lead' | 'gate_supervisor';
   avatar?: string;
-  provider?: 'password' | 'google' | 'apple' | 'magic_link';
+  provider?: 'password' | 'google' | 'apple' | 'magic_link' | 'supabase';
   organizationId?: string;
   status?: 'active' | 'suspended' | 'pending_verification';
   phone?: string;

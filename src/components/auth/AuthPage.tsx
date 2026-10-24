@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { AuthUser } from '../../types';
 import { store } from '../../lib/store';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import confetti from 'canvas-confetti';
 
 import heroFestivalImg from '../../assets/images/hero_afro_festival_1791591623547.jpg';
@@ -94,7 +95,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     }, 300);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessNotice(null);
@@ -104,8 +105,85 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       return;
     }
 
+    if (!email.trim()) {
+      setErrorMsg('Please enter a valid email address.');
+      return;
+    }
+
+    if (!password.trim() || password.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
+      return;
+    }
+
     setIsLoading(true);
 
+    if (isSupabaseConfigured()) {
+      try {
+        if (mode === 'signup') {
+          const { data, error } = await supabase.auth.signUp({
+            email: email.trim(),
+            password: password,
+            options: {
+              data: {
+                full_name: name.trim(),
+                role: role,
+              },
+            },
+          });
+
+          if (error) {
+            setErrorMsg(error.message);
+            setIsLoading(false);
+            return;
+          }
+
+          setIsLoading(false);
+          confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+          const userId = data.user?.id || 'usr-' + Date.now().toString(36);
+          const authenticatedUser: AuthUser = {
+            id: userId,
+            name: name.trim(),
+            email: data.user?.email || email.trim(),
+            role,
+            provider: 'supabase',
+            organizationId: role === 'organizer' ? 'org-' + userId.slice(0, 8) : undefined,
+          };
+          store.setCurrentUser(authenticatedUser);
+          onAuthenticated(authenticatedUser);
+          return;
+        } else {
+          // Login
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password: password,
+          });
+
+          if (error) {
+            setErrorMsg(error.message);
+            setIsLoading(false);
+            return;
+          }
+
+          setIsLoading(false);
+          const userMetaRole = (data.user?.user_metadata?.role as AuthUser['role']) || role;
+          const authenticatedUser: AuthUser = {
+            id: data.user?.id || 'usr-' + Date.now().toString(36),
+            name: data.user?.user_metadata?.full_name || email.split('@')[0],
+            email: data.user?.email || email.trim(),
+            role: userMetaRole,
+            provider: 'supabase',
+            organizationId: userMetaRole === 'organizer' ? 'org-' + (data.user?.id || '').slice(0, 8) : undefined,
+          };
+          store.setCurrentUser(authenticatedUser);
+          onAuthenticated(authenticatedUser);
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Supabase auth execution error:', err);
+      }
+    }
+
+    // Local Fallback
     setTimeout(() => {
       setIsLoading(false);
       const authenticatedUser: AuthUser = {

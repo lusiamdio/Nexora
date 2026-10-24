@@ -427,6 +427,106 @@ app.get('/api/health', (_req, res) => {
 });
 
 // -------------------------------------------------------------
+// 5. Supabase Integration & Key Rotation Endpoints
+// -------------------------------------------------------------
+app.get('/supabase_schema.sql', (_req, res) => {
+  res.sendFile(path.resolve(__dirname, 'supabase_schema.sql'));
+});
+app.get('/api/supabase/schema', (_req, res) => {
+  res.sendFile(path.resolve(__dirname, 'supabase_schema.sql'));
+});
+
+app.get('/api/supabase/status', async (_req, res) => {
+  const url = process.env.VITE_SUPABASE_URL || process.env.Supabase_project_url || process.env.SUPABASE_PROJECT_URL || 'https://kunabampibfcmnbyjads.supabase.co';
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.Supabase_anon_key || process.env.SUPABASE_ANON_KEY || process.env.Supabase_publishable_key || '';
+  const projectId = process.env.Supabase_project_id || 'kunabampibfcmnbyjads';
+
+  const startTime = Date.now();
+  let authStatus = 'unknown';
+  let restStatus = 'unknown';
+  let schemaDeployed = false;
+
+  try {
+    const authRes = await fetch(`${url}/auth/v1/health`, {
+      headers: { apikey: anonKey },
+    });
+    if (authRes.ok) {
+      const authData = await authRes.json().catch(() => ({}));
+      authStatus = `online (${authData.name || 'GoTrue'} ${authData.version || ''})`.trim();
+    } else {
+      authStatus = `unreachable (${authRes.status})`;
+    }
+
+    const restRes = await fetch(`${url}/rest/v1/events?select=count`, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    });
+    if (restRes.ok) {
+      restStatus = 'online (tables ready)';
+      schemaDeployed = true;
+    } else if (restRes.status === 404 || restRes.status === 400) {
+      const body = await restRes.json().catch(() => ({}));
+      if (body.code === 'PGRST205' || body.message?.includes('schema cache')) {
+        restStatus = 'authenticated (schema pending execution in Supabase SQL editor)';
+        schemaDeployed = false;
+      } else {
+        restStatus = `authenticated (${body.message || restRes.statusText})`;
+      }
+    } else {
+      restStatus = `status ${restRes.status}`;
+    }
+
+    return res.json({
+      connected: true,
+      projectId,
+      url,
+      authStatus,
+      restStatus,
+      schemaDeployed,
+      keyFingerprint: anonKey.length > 12 ? `${anonKey.slice(0, 6)}...${anonKey.slice(-4)}` : 'configured',
+      latencyMs: Date.now() - startTime,
+      lastRotatedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      connected: false,
+      error: err.message,
+      projectId,
+      url,
+      latencyMs: Date.now() - startTime,
+    });
+  }
+});
+
+app.post('/api/admin/rotate-keys', (req, res) => {
+  const { passkey, newAnonKey, newUrl, webhookSecret } = req.body;
+  if (passkey !== 'NEXORA-0102@') {
+    return res.status(403).json({ error: 'Sovereign root passkey rejected. Unauthorized rotation attempt.' });
+  }
+
+  // Update in process memory
+  if (newUrl) process.env.Supabase_project_url = newUrl;
+  if (newAnonKey) {
+    process.env.Supabase_anon_key = newAnonKey;
+    process.env.VITE_SUPABASE_ANON_KEY = newAnonKey;
+  }
+  if (webhookSecret) {
+    process.env.PAYSTACK_SECRET_KEY = webhookSecret;
+    process.env.STRIPE_WEBHOOK_SECRET = webhookSecret;
+  }
+
+  const anonKey = process.env.Supabase_anon_key || '';
+  const fingerprint = anonKey.length > 12 ? `${anonKey.slice(0, 6)}...${anonKey.slice(-4)}` : 'rotated';
+
+  return res.json({
+    success: true,
+    message: 'Cryptographic credentials rotated into active memory successfully.',
+    rotatedAt: new Date().toISOString(),
+    keyFingerprint: fingerprint,
+    project: process.env.Supabase_project_id || 'kunabampibfcmnbyjads',
+  });
+});
+
+// -------------------------------------------------------------
 // Dev & Production Middleware Setup
 // -------------------------------------------------------------
 const isProd = process.env.NODE_ENV === 'production';
