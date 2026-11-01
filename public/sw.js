@@ -1,8 +1,8 @@
-const CACHE_NAME = 'nexora-offline-v1';
+const CACHE_NAME = 'nexora-offline-v2';
 const OFFLINE_URLS = [
   '/',
   '/index.html',
-  '/public/manifest.json'
+  '/manifest.json'
 ];
 
 self.addEventListener('install', (event) => {
