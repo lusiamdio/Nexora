@@ -532,11 +532,6 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     setKeyRotateError(null);
     setKeyRotateSuccess(null);
 
-    if (rotatePasskeyInput.trim() !== 'NEXORA-0102@') {
-      setKeyRotateError('Invalid sovereign root passkey. Access denied.');
-      return;
-    }
-
     try {
       const resp = await fetch('/api/admin/rotate-keys', {
         method: 'POST',

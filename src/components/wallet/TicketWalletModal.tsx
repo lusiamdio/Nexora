@@ -47,6 +47,7 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
   const [transferModalTicket, setTransferModalTicket] = useState<Ticket | null>(null);
   const [transferName, setTransferName] = useState('');
   const [transferEmail, setTransferEmail] = useState('');
+  const [transferError, setTransferError] = useState('');
 
   // Refund state
   const [refundModalTicket, setRefundModalTicket] = useState<Ticket | null>(null);
@@ -92,15 +93,10 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
 
   const handleExecuteTransfer = () => {
     if (!transferModalTicket || !transferName.trim() || !transferEmail.trim()) return;
-    transferModalTicket.attendeeName = transferName;
-    transferModalTicket.attendeeEmail = transferEmail;
-    
-    // update in store
-    const all = store.getTickets();
-    const idx = all.findIndex(t => t.id === transferModalTicket.id);
-    if (idx !== -1) {
-      all[idx] = transferModalTicket;
-      localStorage.setItem('nexora_db_v2_tickets', JSON.stringify(all));
+    setTransferError('');
+    if (!store.updateTicketAttendee(transferModalTicket.id, transferName.trim(), transferEmail.trim(), transferModalTicket.attendeePhone)) {
+      setTransferError('Could not save the transfer. Please try again.');
+      return;
     }
     setTransferModalTicket(null);
     setTransferName('');
@@ -427,6 +423,7 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
                         <>
                           <button
                             onClick={() => {
+                              setTransferError('');
                               setTransferModalTicket(selectedTicket);
                               setTransferName(selectedTicket.attendeeName);
                               setTransferEmail(selectedTicket.attendeeEmail);
@@ -582,7 +579,8 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              {transferError && <p role="alert" className="text-xs text-red-600">{transferError}</p>}
+                <div className="flex justify-end gap-2 pt-2">
                 <button
                   onClick={() => setTransferModalTicket(null)}
                   className="px-3 py-2 text-xs text-[#4B5563] hover:bg-[#F8F7F4] rounded-lg"

@@ -49,11 +49,13 @@ function loadFromStorage<T>(key: string, defaultValue: T): T {
   }
 }
 
-function saveToStorage<T>(key: string, data: T): void {
+function saveToStorage<T>(key: string, data: T): boolean {
   try {
     localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(data));
+    return true;
   } catch (err) {
     console.error('Storage error for', key, err);
+    return false;
   }
 }
 
@@ -2025,6 +2027,14 @@ class NexoraStore {
     const event = this.getEventById(orderInput.eventId);
     if (!event) return { order: null as any, success: false, error: 'Event not found' };
 
+    if (!orderInput.items.length || new Set(orderInput.items.map(item => item.tierId)).size !== orderInput.items.length ||
+        orderInput.items.some(item => !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) {
+      return { order: null as any, success: false, error: 'Select a positive quantity for each ticket tier' };
+    }
+    if (orderInput.promoCode && !this.validatePromoCode(orderInput.promoCode, event.id)) {
+      return { order: null as any, success: false, error: 'Invalid or expired promotional code' };
+    }
+
     for (const item of orderInput.items) {
       const tier = event.tickets.find(t => t.id === item.tierId);
       if (!tier) return { order: null as any, success: false, error: `Invalid ticket tier` };
@@ -2059,7 +2069,7 @@ class NexoraStore {
     const feeMinor = subtotalMinor > 0 ? Math.round((subtotalMinor - discountMinor) * 0.035) : 0;
     const totalMinor = Math.max(0, subtotalMinor - discountMinor + feeMinor);
 
-    const orderId = 'ord-' + Date.now();
+    const orderId = 'ord-' + crypto.randomUUID();
     const orderReference = 'NX-' + Math.floor(100000 + Math.random() * 900000);
 
     const order: Order = {
@@ -2097,6 +2107,9 @@ class NexoraStore {
     paymentProvider: Order['paymentProvider'],
     paymentMethod: string
   ): { success: boolean; tickets: Ticket[]; order?: Order; error?: string } {
+    if (paymentProvider !== 'sandbox') {
+      return { success: false, tickets: [], error: 'Live payments are not available' };
+    }
     const orderIndex = this.orders.findIndex(o => o.id === orderId);
     if (orderIndex === -1) return { success: false, tickets: [], error: 'Order not found' };
 
@@ -2109,6 +2122,16 @@ class NexoraStore {
     const event = this.getEventById(order.eventId);
     if (!event) return { success: false, tickets: [], error: 'Associated event not found' };
 
+    // Availability may have changed since order creation.
+    for (const item of order.items) {
+      const tier = event.tickets.find(t => t.id === item.tierId);
+      if (!tier || tier.remaining < item.quantity) {
+        return { success: false, tickets: [], error: 'Ticket availability changed. Please select tickets again.' };
+      }
+    }
+    if (order.promoCodeApplied && !this.validatePromoCode(order.promoCodeApplied, event.id)) {
+      return { success: false, tickets: [], error: 'Promotional code has expired' };
+    }
     for (const item of order.items) {
       const tier = event.tickets.find(t => t.id === item.tierId);
       if (tier) {
@@ -2248,14 +2271,16 @@ class NexoraStore {
     return this.tickets.find(t => t.ticketCode.toUpperCase() === cleanCode);
   }
 
-  public updateTicketAttendee(ticketId: string, name: string, email: string, phone: string): void {
+  public updateTicketAttendee(ticketId: string, name: string, email: string, phone: string): boolean {
     const ticket = this.tickets.find(t => t.id === ticketId);
-    if (ticket) {
-      ticket.attendeeName = name;
-      ticket.attendeeEmail = email;
-      ticket.attendeePhone = phone;
-      saveToStorage('tickets', this.tickets);
-    }
+    if (!ticket) return false;
+    const previous = { attendeeName: ticket.attendeeName, attendeeEmail: ticket.attendeeEmail, attendeePhone: ticket.attendeePhone };
+    ticket.attendeeName = name;
+    ticket.attendeeEmail = email;
+    ticket.attendeePhone = phone;
+    if (saveToStorage('tickets', this.tickets)) return true;
+    Object.assign(ticket, previous);
+    return false;
   }
 
   // Check-In

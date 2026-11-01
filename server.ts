@@ -10,7 +10,8 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
+app.disable('x-powered-by');
 
 // Capture raw body for cryptographic webhook HMAC verification
 app.use(express.json({
@@ -338,80 +339,47 @@ app.post('/api/waitlist/reclaim-cycle', (req, res) => {
 // -------------------------------------------------------------
 // 6. Cryptographic Webhook Receivers with Raw HMAC Validation
 // -------------------------------------------------------------
-// Paystack webhook with SHA-512 HMAC verification
+// Webhooks authenticate the exact request body; they only acknowledge events.
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
 app.post('/api/webhooks/paystack', (req: any, res) => {
-  const signature = req.headers['x-paystack-signature'];
-  const secret = process.env.PAYSTACK_SECRET_KEY || 'sk_test_nexora_paystack_secret_mock';
-
-  if (!signature) {
-    return res.status(400).json({ error: 'Missing x-paystack-signature header' });
-  }
-
-  const raw = req.rawBody || Buffer.from(JSON.stringify(req.body));
-  const expected = crypto.createHmac('sha512', secret).update(raw).digest('hex');
-
-  const isValid = signature === expected || signature === 'simulated-valid-test-signature';
-  if (!isValid && process.env.NODE_ENV === 'production') {
-    return res.status(401).json({ error: 'Invalid HMAC signature signature mismatch' });
-  }
-
-  const event = req.body?.event || 'charge.success';
-  const data = req.body?.data || {};
-
-  return res.status(200).json({
-    received: true,
-    provider: 'Paystack',
-    event,
-    reference: data.reference || 'REF-' + Date.now(),
-    verified: true,
-    processedAt: new Date().toISOString(),
-  });
+  const secret = process.env.PAYSTACK_SECRET_KEY;
+  if (!secret) return res.status(503).json({ error: 'Paystack webhook is not configured' });
+  const signature = req.get('x-paystack-signature');
+  if (!signature || !req.rawBody) return res.status(400).json({ error: 'Missing signature or body' });
+  const expected = crypto.createHmac('sha512', secret).update(req.rawBody).digest('hex');
+  if (!safeEqual(signature, expected)) return res.status(401).json({ error: 'Invalid Paystack signature' });
+  return res.json({ received: true, provider: 'Paystack', event: req.body?.event, verified: true });
 });
 
-// Stripe webhook with SHA-256 HMAC verification
 app.post('/api/webhooks/stripe', (req: any, res) => {
-  const signature = req.headers['stripe-signature'];
-  const secret = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_nexora_stripe_secret_mock';
-
-  if (!signature) {
-    return res.status(400).json({ error: 'Missing stripe-signature header' });
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) return res.status(503).json({ error: 'Stripe webhook is not configured' });
+  const signature = req.get('stripe-signature');
+  if (!signature || !req.rawBody) return res.status(400).json({ error: 'Missing signature or body' });
+  const parts = signature.split(',').map((part: string) => part.trim().split('='));
+  const timestamp = parts.find(([key]: string[]) => key === 't')?.[1];
+  const signatures = parts.filter(([key]: string[]) => key === 'v1').map(([, value]: string[]) => value);
+  if (!timestamp || !/^\d+$/.test(timestamp) || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) {
+    return res.status(401).json({ error: 'Invalid Stripe signature timestamp' });
   }
-
-  const raw = req.rawBody || Buffer.from(JSON.stringify(req.body));
-  const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-
-  const isValid = signature.includes(expected) || signature === 'simulated-valid-test-signature';
-  if (!isValid && process.env.NODE_ENV === 'production') {
+  const expected = crypto.createHmac('sha256', secret).update(timestamp + '.').update(req.rawBody).digest('hex');
+  if (!signatures.some((value: string) => value && safeEqual(value, expected))) {
     return res.status(401).json({ error: 'Invalid Stripe signature' });
   }
-
-  return res.status(200).json({
-    received: true,
-    provider: 'Stripe',
-    eventType: req.body?.type || 'payment_intent.succeeded',
-    verified: true,
-    processedAt: new Date().toISOString(),
-  });
+  return res.json({ received: true, provider: 'Stripe', eventType: req.body?.type, verified: true });
 });
 
-// Flutterwave webhook with Secret Hash verification
 app.post('/api/webhooks/flutterwave', (req, res) => {
-  const secretHash = req.headers['verif-hash'];
-  const expectedHash = process.env.FLUTTERWAVE_SECRET_HASH || 'flw_nexora_hash_mock';
-
-  if (!secretHash || (secretHash !== expectedHash && secretHash !== 'simulated-valid-test-signature')) {
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(401).json({ error: 'Invalid verif-hash' });
-    }
-  }
-
-  return res.status(200).json({
-    received: true,
-    provider: 'Flutterwave',
-    event: req.body?.event || 'charge.completed',
-    verified: true,
-    processedAt: new Date().toISOString(),
-  });
+  const expected = process.env.FLUTTERWAVE_SECRET_HASH;
+  if (!expected) return res.status(503).json({ error: 'Flutterwave webhook is not configured' });
+  const signature = req.get('verif-hash');
+  if (!signature || !safeEqual(signature, expected)) return res.status(401).json({ error: 'Invalid verif-hash' });
+  return res.json({ received: true, provider: 'Flutterwave', event: req.body?.event, verified: true });
 });
 
 // Health check endpoint
@@ -421,8 +389,6 @@ app.get('/api/health', (_req, res) => {
     system: 'Nexora Core Gateway',
     version: '3.4.0',
     timestamp: new Date().toISOString(),
-    circuitBreakers: 'operational',
-    ledgerBalanced: true,
   });
 });
 
@@ -476,7 +442,7 @@ app.get('/api/supabase/status', async (_req, res) => {
     }
 
     return res.json({
-      connected: true,
+      connected: authRes.ok || restRes.ok,
       projectId,
       url,
       authStatus,
@@ -484,7 +450,6 @@ app.get('/api/supabase/status', async (_req, res) => {
       schemaDeployed,
       keyFingerprint: anonKey.length > 12 ? `${anonKey.slice(0, 6)}...${anonKey.slice(-4)}` : 'configured',
       latencyMs: Date.now() - startTime,
-      lastRotatedAt: new Date().toISOString(),
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -498,20 +463,27 @@ app.get('/api/supabase/status', async (_req, res) => {
 });
 
 app.post('/api/admin/rotate-keys', (req, res) => {
-  const { passkey, newAnonKey, newUrl, webhookSecret } = req.body;
-  if (passkey !== 'NEXORA-0102@') {
+  const { passkey, newAnonKey, newUrl } = req.body;
+  const adminPasskey = process.env.ADMIN_ROTATION_PASSKEY;
+  if (!adminPasskey) return res.status(503).json({ error: 'Key rotation is not configured' });
+  if (typeof passkey !== 'string' || !safeEqual(passkey, adminPasskey)) {
     return res.status(403).json({ error: 'Sovereign root passkey rejected. Unauthorized rotation attempt.' });
   }
 
-  // Update in process memory
-  if (newUrl) process.env.Supabase_project_url = newUrl;
+  // Restrict the server-side health check target to Supabase-hosted projects.
+  if (newUrl) {
+    try {
+      const parsed = new URL(newUrl);
+      if (parsed.protocol !== 'https:' || !/^[a-z0-9-]+\.supabase\.co$/i.test(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) throw new Error();
+      process.env.Supabase_project_url = parsed.origin;
+      process.env.VITE_SUPABASE_URL = parsed.origin;
+    } catch {
+      return res.status(400).json({ error: 'Invalid Supabase project URL' });
+    }
+  }
   if (newAnonKey) {
     process.env.Supabase_anon_key = newAnonKey;
     process.env.VITE_SUPABASE_ANON_KEY = newAnonKey;
-  }
-  if (webhookSecret) {
-    process.env.PAYSTACK_SECRET_KEY = webhookSecret;
-    process.env.STRIPE_WEBHOOK_SECRET = webhookSecret;
   }
 
   const anonKey = process.env.Supabase_anon_key || '';
@@ -538,6 +510,7 @@ if (!isProd) {
   app.use(vite.middlewares);
 } else {
   app.use(express.static(path.resolve(__dirname, 'dist')));
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
   app.get('*', (req, res) => {
     res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
   });

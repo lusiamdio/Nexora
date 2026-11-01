@@ -37,8 +37,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   selectedItems,
   onTicketsIssued,
 }) => {
-  if (!isOpen) return null;
-
   // Checkout Steps: 1: Details & Review, 2: Payment Gateway, 3: Processing, 4: Confirmation & Tickets
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
@@ -65,7 +63,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [secondsRemaining, setSecondsRemaining] = useState(600);
 
   useEffect(() => {
-    if (step >= 4) return;
+    if (!isOpen || step >= 4) return;
     const interval = setInterval(() => {
       setSecondsRemaining(prev => {
         if (prev <= 1) {
@@ -76,7 +74,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [step]);
+  }, [step, isOpen]);
 
   const minutes = Math.floor(secondsRemaining / 60);
   const seconds = secondsRemaining % 60;
@@ -102,13 +100,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setPromoError('');
     const cleanCode = promoCodeInput.trim().toUpperCase();
     if (!cleanCode) return;
-
-    // Check if referral code (starts with REF, NEX, or contains REF)
-    if (cleanCode.startsWith('REF') || cleanCode.startsWith('NEX') || cleanCode.includes('FRIEND')) {
-      setAppliedPromo({ code: cleanCode, discountPct: 10 });
-      setPromoCodeInput('');
-      return;
-    }
 
     const promo = store.validatePromoCode(cleanCode, event.id);
     if (promo) {
@@ -205,6 +196,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setStep(2);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-[#111827]/85 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
@@ -408,7 +401,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {step === 2 && (
             <div className="space-y-6">
               <div>
-                <h4 className="text-base font-bold text-[#111827]">Select Payment Method</h4>
+                <h4 className="text-base font-bold text-[#111827]">Select Payment Method (sandbox only)</h4>
                 <p className="text-xs text-[#6B7280]">
                   Encrypted bank-grade checkout powered by localized payment infrastructure
                 </p>
@@ -448,7 +441,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <input
                     type="radio"
                     name="paymentProvider"
-                    checked={paymentProvider === 'ozow'}
+                    disabled
+                          checked={paymentProvider === 'ozow'}
                     onChange={() => setPaymentProvider('ozow')}
                     className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
                   />
@@ -470,7 +464,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <input
                     type="radio"
                     name="paymentProvider"
-                    checked={paymentProvider === 'mpesa'}
+                    disabled
+                          checked={paymentProvider === 'mpesa'}
                     onChange={() => setPaymentProvider('mpesa')}
                     className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
                   />
@@ -506,7 +501,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <input
                     type="radio"
                     name="paymentProvider"
-                    checked={paymentProvider === 'paystack'}
+                    disabled
+                          checked={paymentProvider === 'paystack'}
                     onChange={() => setPaymentProvider('paystack')}
                     className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
                   />

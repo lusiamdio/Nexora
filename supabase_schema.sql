@@ -749,7 +749,7 @@ BEGIN
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
     NEW.email,
-    COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'attendee'::user_role),
+    CASE WHEN NEW.raw_user_meta_data->>'role' = 'organizer' THEN 'organizer'::user_role ELSE 'attendee'::user_role END,
     NEW.raw_user_meta_data->>'avatar_url',
     COALESCE(NEW.raw_user_meta_data->>'country', 'ZA'),
     timezone('utc'::text, now()),
@@ -762,7 +762,7 @@ BEGIN
     
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- Recreate trigger on auth.users
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
@@ -788,14 +788,9 @@ BEGIN
   -- Locate ticket by ticket_code
   SELECT * INTO v_ticket 
   FROM public.tickets 
-  WHERE ticket_code = p_ticket_code;
+  WHERE ticket_code = p_ticket_code FOR UPDATE;
 
   IF NOT FOUND THEN
-    INSERT INTO public.check_ins (
-      ticket_id, ticket_code, event_id, staff_name, scanner_user_id, gate, result, message
-    ) VALUES (
-      uuid_nil(), p_ticket_code, uuid_nil(), p_staff_name, p_scanner_user_id, p_gate, 'invalid', 'Ticket code not found in registry.'
-    );
     RETURN jsonb_build_object('success', false, 'result', 'invalid', 'message', 'Invalid Ticket Code.');
   END IF;
 
@@ -847,7 +842,7 @@ BEGIN
     'tierName', (SELECT name FROM public.ticket_tiers WHERE id = v_ticket.tier_id)
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ----------------------------------------------------------------------------
 -- 5.3 CASHLESS RFID POS DEDUCTION FUNCTION
@@ -864,6 +859,9 @@ DECLARE
   v_new_bal BIGINT;
   v_ref TEXT;
 BEGIN
+  IF p_amount_minor IS NULL OR p_amount_minor <= 0 THEN
+    RETURN jsonb_build_object('success', false, 'message', 'Charge amount must be positive.');
+  END IF;
   SELECT * INTO v_wb 
   FROM public.cashless_wristbands 
   WHERE uid = p_uid FOR UPDATE;
@@ -905,12 +903,12 @@ BEGIN
     'reference', v_ref
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ----------------------------------------------------------------------------
 -- 5.4 DOUBLE-ENTRY LEDGER RECONCILIATION AUDIT VIEW
 -- ----------------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.v_ledger_reconciliation AS
+CREATE OR REPLACE VIEW public.v_ledger_reconciliation WITH (security_invoker = true) AS
 SELECT 
   currency,
   SUM(debit_minor) AS total_debits_minor,
@@ -957,14 +955,14 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE FUNCTION public.current_user_role()
 RETURNS user_role AS $$
   SELECT role FROM public.profiles WHERE id = auth.uid();
-$$ LANGUAGE sql STABLE SECURITY DEFINER;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
   );
-$$ LANGUAGE sql STABLE SECURITY DEFINER;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ----------------------------------------------------------------------------
 -- RLS: PROFILES
@@ -977,6 +975,16 @@ CREATE POLICY "Users can update their own profile"
   ON public.profiles FOR UPDATE
   USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
+
+-- Profile owners may edit contact details, not roles or risk controls.
+REVOKE UPDATE ON public.profiles FROM PUBLIC, anon, authenticated;
+GRANT UPDATE (name, phone, avatar_url, country, city) ON public.profiles TO authenticated;
+
+-- These SECURITY DEFINER routines bypass RLS and must only be called by trusted services.
+REVOKE ALL ON FUNCTION public.record_ticket_scan(TEXT, TEXT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.process_wristband_charge(TEXT, BIGINT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.record_ticket_scan(TEXT, TEXT, TEXT, UUID) TO service_role;
+GRANT EXECUTE ON FUNCTION public.process_wristband_charge(TEXT, BIGINT, TEXT, UUID) TO service_role;
 
 -- ----------------------------------------------------------------------------
 -- RLS: EVENTS
@@ -1074,9 +1082,7 @@ CREATE POLICY "Check-in logs viewable by organizers, staff, and admins"
     )
   );
 
-CREATE POLICY "Gate staff can insert check-in records"
-  ON public.check_ins FOR INSERT
-  WITH CHECK (true);
+-- Check-in writes require a trusted service until staff authorization is implemented.
 
 -- ----------------------------------------------------------------------------
 -- RLS: GENERAL LEDGER

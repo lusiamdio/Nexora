@@ -50,6 +50,7 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
   const [transferModalTicket, setTransferModalTicket] = useState<Ticket | null>(null);
   const [transferName, setTransferName] = useState('');
   const [transferEmail, setTransferEmail] = useState('');
+  const [transferError, setTransferError] = useState('');
   const [transferSuccess, setTransferSuccess] = useState(false);
 
   // Refund state
@@ -105,11 +106,10 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
     e.preventDefault();
     if (!transferModalTicket || !transferName.trim() || !transferEmail.trim()) return;
 
-    const all = store.getTickets();
-    const idx = all.findIndex(t => t.id === transferModalTicket.id);
-    if (idx !== -1) {
-      all[idx] = { ...transferModalTicket, attendeeName: transferName.trim(), attendeeEmail: transferEmail.trim() };
-      localStorage.setItem('nexora_db_v2_tickets', JSON.stringify(all));
+    setTransferError('');
+    if (!store.updateTicketAttendee(transferModalTicket.id, transferName.trim(), transferEmail.trim(), transferModalTicket.attendeePhone)) {
+      setTransferError('Could not save the transfer. Please try again.');
+      return;
     }
 
     setTransferSuccess(true);
@@ -369,6 +369,7 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
                     }`}>
                       <button
                         onClick={() => {
+                          setTransferError('');
                           setTransferModalTicket(ticket);
                           setTransferName('');
                           setTransferEmail('');
@@ -442,6 +443,7 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
                     }`}
                   />
                 </div>
+                {transferError && <p role="alert" className="text-xs text-red-600">{transferError}</p>}
                 <div className="flex gap-3 pt-2">
                   <button
                     type="button"
