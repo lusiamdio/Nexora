@@ -72,47 +72,45 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
   // Brand Identity Form State
   const [name, setName] = useState(organizer.name);
   const [legalEntityName, setLegalEntityName] = useState(organizer.legalEntityName);
-  const [bio, setBio] = useState(organizer.bio || 'Premier event curation company delivering high-impact cultural spectacles, concerts, and professional summits.');
-  const [website, setWebsite] = useState(organizer.website || 'https://nexora.events');
+  const [bio, setBio] = useState(organizer.bio || '');
+  const [website, setWebsite] = useState(organizer.website || '');
   const [logoUrl, setLogoUrl] = useState(organizer.logoUrl || heroFestivalImg);
   const [bannerUrl, setBannerUrl] = useState(organizer.bannerUrl || heroFestivalImg);
 
   // Social handles
-  const [instagram, setInstagram] = useState(organizer.socialLinks?.instagram || '@capetownvibes');
-  const [twitter, setTwitter] = useState(organizer.socialLinks?.twitter || '@cptvibeslive');
-  const [linkedin, setLinkedin] = useState(organizer.socialLinks?.linkedin || 'cape-town-vibes');
-  const [youtube, setYoutube] = useState(organizer.socialLinks?.youtube || '@capetownvibeslive');
+  const [instagram, setInstagram] = useState(organizer.socialLinks?.instagram || '');
+  const [twitter, setTwitter] = useState(organizer.socialLinks?.twitter || '');
+  const [linkedin, setLinkedin] = useState(organizer.socialLinks?.linkedin || '');
+  const [youtube, setYoutube] = useState(organizer.socialLinks?.youtube || '');
 
   // Contact & Location
   const [email, setEmail] = useState(organizer.email);
-  const [supportEmail, setSupportEmail] = useState('attendees@capetownvibes.co.za');
+  const [supportEmail, setSupportEmail] = useState(organizer.email || '');
   const [phone, setPhone] = useState(organizer.phone);
   const [country, setCountry] = useState(organizer.country);
   const [city, setCity] = useState(organizer.city);
-  const [address, setAddress] = useState(organizer.address || 'Suite 402, The Boulevard Office Park, Woodstock, Cape Town');
+  const [address, setAddress] = useState(organizer.address || '');
 
   // Settlement Banking
   const [bankName, setBankName] = useState(organizer.bankDetails.bankName);
   const [accountNumber, setAccountNumber] = useState(organizer.bankDetails.accountNumber);
   const [accountHolder, setAccountHolder] = useState(organizer.bankDetails.accountHolder);
-  const [branchCode, setBranchCode] = useState(organizer.bankDetails.branchCode || '250655');
+  const [branchCode, setBranchCode] = useState(organizer.bankDetails.branchCode || '');
   const [accountType, setAccountType] = useState(organizer.bankDetails.accountType || 'Business Cheque');
   const [settlementSchedule, setSettlementSchedule] = useState<'daily' | 'weekly' | 'post_event'>('daily');
 
   // Legal & Compliance
-  const [taxNumber, setTaxNumber] = useState(organizer.taxNumber || 'ZA-VAT-4910294821');
-  const [registrationNumber, setRegistrationNumber] = useState('2019/584910/07');
+  const [taxNumber, setTaxNumber] = useState(organizer.taxNumber || '');
+  const [registrationNumber, setRegistrationNumber] = useState(organizer.registrationNumber || '');
 
   // Operational Policies
   const [refundPolicy, setRefundPolicy] = useState('Flexible 48-Hour Guarantee');
   const [absorbFees, setAbsorbFees] = useState(false);
   const [allowTransfers, setAllowTransfers] = useState(true);
 
-  // Team Members
+  // Team Members (Real owner baseline — invite new members in real time)
   const [teamMembers, setTeamMembers] = useState([
-    { name: 'David Mokoena', role: 'Managing Director & Founder', email: organizer.email, status: 'Owner' },
-    { name: 'Zanele Ndlovu', role: 'Lead Event Operations', email: 'zanele@capetownvibes.co.za', status: 'Manager' },
-    { name: 'Kwame Mensah', role: 'Box Office & Gate Supervisor', email: 'kwame@capetownvibes.co.za', status: 'Gate Lead' },
+    { name: organizer.name || organizer.email, role: 'Managing Account Owner', email: organizer.email, status: 'Owner' },
   ]);
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberRole, setNewMemberRole] = useState('Event Staff');
@@ -185,6 +183,7 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
       city: city.trim(),
       address: address.trim(),
       taxNumber: taxNumber.trim(),
+      registrationNumber: registrationNumber.trim(),
       socialLinks: {
         instagram: instagram.trim(),
         twitter: twitter.trim(),

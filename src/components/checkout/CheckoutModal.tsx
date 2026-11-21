@@ -37,21 +37,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   selectedItems,
   onTicketsIssued,
 }) => {
+  const activeUser = store.getCurrentUser();
+
   // Checkout Steps: 1: Details & Review, 2: Payment Gateway, 3: Processing, 4: Confirmation & Tickets
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Customer Form
-  const [name, setName] = useState('Nomvula Dlamini');
-  const [email, setEmail] = useState('nomvula.dlamini@example.com');
-  const [phone, setPhone] = useState('+27 82 491 0293');
+  const [name, setName] = useState(activeUser?.name || '');
+  const [email, setEmail] = useState(activeUser?.email || '');
+  const [phone, setPhone] = useState('');
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPct: number } | null>(null);
   const [promoError, setPromoError] = useState('');
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [referralCopied, setReferralCopied] = useState(false);
 
   // Payment Selection
   const [paymentProvider, setPaymentProvider] = useState<'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'sandbox'>('sandbox');
-  const [mpesaNumber, setMpesaNumber] = useState('254712345678');
-  const [cardNumber, setCardNumber] = useState('•••• •••• •••• 4242');
+  const [mpesaNumber, setMpesaNumber] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
 
   // Active Order & Issued Tickets
   const [order, setOrder] = useState<Order | null>(null);
@@ -74,7 +78,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [step, isOpen]);
+  }, [isOpen, step]);
+
+  if (!isOpen) return null;
 
   const minutes = Math.floor(secondsRemaining / 60);
   const seconds = secondsRemaining % 60;
@@ -95,7 +101,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const totalMinor = Math.max(0, subtotalMinor - discountMinor + platformFeeMinor);
 
-  // Apply promo or friend referral code
+  // Apply promo code from real organizer catalog
   const handleApplyPromo = () => {
     setPromoError('');
     const cleanCode = promoCodeInput.trim().toUpperCase();
@@ -106,13 +112,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setAppliedPromo({ code: promo.code, discountPct: promo.discountPercentage });
       setPromoCodeInput('');
     } else {
-      setPromoError('Invalid or expired promotional/referral code');
+      setPromoError('Invalid or expired promotional code');
     }
   };
 
   // Step 1 -> Step 2: Create Order in Store
   const handleProceedToPayment = () => {
-    if (!name.trim() || !email.trim()) return;
+    setCheckoutError(null);
+    if (!name.trim() || !email.trim()) {
+      setCheckoutError('Please enter your full name and email address to reserve tickets.');
+      return;
+    }
 
     const res = store.createOrder({
       eventId: event.id,
@@ -127,13 +137,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setOrder(res.order);
       setStep(2);
     } else {
-      alert(res.error || 'Failed to reserve ticket inventory');
+      setCheckoutError(res.error || 'Failed to reserve ticket inventory.');
     }
   };
 
   // Step 2 -> Step 3 & 4: Execute Payment & Idempotent Ticket Issuance
   const handleExecutePayment = async () => {
     if (!order) return;
+    setCheckoutError(null);
     setStep(3);
 
     // Multi-stage realistic settlement transition
@@ -192,12 +203,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
       setStep(4);
     } else {
-      alert(finalizeRes.error || 'Payment failed');
+      setCheckoutError(finalizeRes.error || 'Payment could not be completed. Please review your details and retry.');
       setStep(2);
     }
   };
-
-  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-[#111827]/85 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
@@ -245,6 +254,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
         {/* Body Content */}
         <div className="p-6 overflow-y-auto flex-1">
+          {checkoutError && (
+            <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
+                <span>{checkoutError}</span>
+              </div>
+              <button type="button" onClick={() => setCheckoutError(null)} className="text-red-500 hover:text-red-800 cursor-pointer">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           
           {/* STEP 1: Attendee Details & Order Review */}
           {step === 1 && (
@@ -286,7 +306,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       value={name}
                       onChange={e => setName(e.target.value)}
                       required
-                      placeholder="e.g. Nomvula Dlamini"
+                      placeholder="Full legal name"
                       className="w-full px-3 py-2 text-sm bg-white border border-[#D1D5DB] rounded-lg focus:outline-none focus:border-[#F6A623]"
                     />
                   </div>
@@ -300,7 +320,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       value={email}
                       onChange={e => setEmail(e.target.value)}
                       required
-                      placeholder="nomvula@example.com"
+                      placeholder="name@domain.com"
                       className="w-full px-3 py-2 text-sm bg-white border border-[#D1D5DB] rounded-lg focus:outline-none focus:border-[#F6A623]"
                     />
                   </div>
@@ -401,7 +421,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {step === 2 && (
             <div className="space-y-6">
               <div>
-                <h4 className="text-base font-bold text-[#111827]">Select Payment Method (sandbox only)</h4>
+                <h4 className="text-base font-bold text-[#111827]">Select Payment Method</h4>
                 <p className="text-xs text-[#6B7280]">
                   Encrypted bank-grade checkout powered by localized payment infrastructure
                 </p>
@@ -441,8 +461,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <input
                     type="radio"
                     name="paymentProvider"
-                    disabled
-                          checked={paymentProvider === 'ozow'}
+                    checked={paymentProvider === 'ozow'}
                     onChange={() => setPaymentProvider('ozow')}
                     className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
                   />
@@ -464,8 +483,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <input
                     type="radio"
                     name="paymentProvider"
-                    disabled
-                          checked={paymentProvider === 'mpesa'}
+                    checked={paymentProvider === 'mpesa'}
                     onChange={() => setPaymentProvider('mpesa')}
                     className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
                   />
@@ -501,8 +519,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <input
                     type="radio"
                     name="paymentProvider"
-                    disabled
-                          checked={paymentProvider === 'paystack'}
+                    checked={paymentProvider === 'paystack'}
                     onChange={() => setPaymentProvider('paystack')}
                     className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
                   />
@@ -658,14 +675,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       onClick={() => {
                         const startIso = new Date(event.startDate).toISOString().replace(/-|:|\.\d\d\d/g, '');
                         const endIso = new Date(event.endDate).toISOString().replace(/-|:|\.\d\d\d/g, '');
-                        const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NEXORA//Events//EN\r\nBEGIN:VEVENT\r\nUID:${event.id}@nexora.events\r\nDTSTAMP:${startIso}\r\nDTSTART:${startIso}\r\nDTEND:${endIso}\r\nSUMMARY:${event.title}\r\nLOCATION:${event.venue.name}, ${event.venue.city}\r\nEND:VEVENT\r\nEND:VCALENDAR`;
+                        const safeTitle = event.title.replace(/[\r\n]/g, ' ');
+                        const safeVenue = `${event.venue.name}, ${event.venue.city}`.replace(/[\r\n]/g, ' ');
+                        const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NEXORA//Events//EN\r\nBEGIN:VEVENT\r\nUID:${event.id}@nexora.events\r\nDTSTAMP:${startIso}\r\nDTSTART:${startIso}\r\nDTEND:${endIso}\r\nSUMMARY:${safeTitle}\r\nLOCATION:${safeVenue}\r\nEND:VEVENT\r\nEND:VCALENDAR`;
                         const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+                        const objUrl = window.URL.createObjectURL(blob);
                         const link = document.createElement('a');
-                        link.href = window.URL.createObjectURL(blob);
+                        link.href = objUrl;
                         link.download = `${event.slug}.ics`;
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
+                        setTimeout(() => window.URL.revokeObjectURL(objUrl), 1000);
                       }}
                       className="px-2.5 py-1.5 bg-white hover:bg-gray-50 text-[#111827] border border-gray-300 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
                     >
@@ -689,12 +710,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     onClick={() => {
                       const refLink = `${window.location.origin}?event=${event.id}&ref=REF-NEX${event.id.slice(-3).toUpperCase()}`;
                       navigator.clipboard?.writeText(refLink);
-                      alert('Referral link copied to clipboard! Share it with your friends for 10% off.');
+                      setReferralCopied(true);
+                      setTimeout(() => setReferralCopied(false), 3000);
                     }}
                     className="px-3 py-1.5 bg-[#101522] hover:bg-[#1f293d] text-[#D7B779] text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs whitespace-nowrap self-start sm:self-auto"
                   >
                     <Share2 className="w-3.5 h-3.5" />
-                    <span>Copy Referral Link</span>
+                    <span>{referralCopied ? 'Referral Link Copied!' : 'Copy Referral Link'}</span>
                   </button>
                 </div>
               </div>

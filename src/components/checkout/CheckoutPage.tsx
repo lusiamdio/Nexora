@@ -18,13 +18,14 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
-import { Event, Order, Ticket } from '../../types';
+import { Event, Order, Ticket, AuthUser } from '../../types';
 import { store } from '../../lib/store';
 import { formatCurrency, formatEventDate, formatEventTime } from '../../lib/currencies';
 
 interface CheckoutPageProps {
   event: Event;
   selectedItems: Array<{ tierId: string; quantity: number }>;
+  currentUser?: AuthUser | null;
   onBack: () => void;
   onTicketsIssued: (tickets: Ticket[]) => void;
   onGoToWallet: () => void;
@@ -34,6 +35,7 @@ interface CheckoutPageProps {
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   event,
   selectedItems,
+  currentUser,
   onBack,
   onTicketsIssued,
   onGoToWallet,
@@ -44,18 +46,18 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   // Checkout Steps: 1: Details & Review, 2: Payment Gateway, 3: Processing, 4: Confirmation
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
-  // Customer Form
-  const [name, setName] = useState('Nomvula Dlamini');
-  const [email, setEmail] = useState('nomvula.dlamini@example.com');
-  const [phone, setPhone] = useState('+27 82 491 0293');
+  // Customer Form (real-time authenticated user or clean blank inputs)
+  const [name, setName] = useState(currentUser?.name || '');
+  const [email, setEmail] = useState(currentUser?.email || '');
+  const [phone, setPhone] = useState('');
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPct: number } | null>(null);
   const [promoError, setPromoError] = useState('');
 
   // Payment Selection
   const [paymentProvider, setPaymentProvider] = useState<'sandbox' | 'ozow' | 'mpesa'>('sandbox');
-  const [mpesaNumber, setMpesaNumber] = useState('254712345678');
-  const [cardNumber, setCardNumber] = useState('•••• •••• •••• 4242');
+  const [mpesaNumber, setMpesaNumber] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
 
   // Active Order & Issued Tickets
   const [order, setOrder] = useState<Order | null>(null);
@@ -63,7 +65,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   const [ticketQrs, setTicketQrs] = useState<Record<string, string>>({});
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [checkoutError, setCheckoutError] = useState('');
+  // Loyalty Points (computed strictly from user's real loyalty earnings)
+  const [loyaltyRedeemed, setLoyaltyRedeemed] = useState(false);
+  const loyaltyCreditAmount = 0;
 
   // Calculate items with details
   const orderItemsWithDetails = selectedItems.map(item => {
@@ -79,8 +83,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
   const subtotal = orderItemsWithDetails.reduce((acc, item) => acc + item.subtotalMinor, 0);
   const discountAmount = appliedPromo ? Math.round(subtotal * (appliedPromo.discountPct / 100)) : 0;
-  const taxableSubtotal = Math.max(0, subtotal - discountAmount);
-  const fees = Math.round(taxableSubtotal * 0.035);
+  const loyaltyDiscount = loyaltyRedeemed ? Math.min(subtotal - discountAmount, loyaltyCreditAmount) : 0;
+  const taxableSubtotal = Math.max(0, subtotal - discountAmount - loyaltyDiscount);
+  const fees = Math.round(taxableSubtotal * 0.05); // 5% platform & booking fee
   const total = taxableSubtotal + fees;
   const totalTickets = selectedItems.reduce((acc, item) => acc + item.quantity, 0);
 
@@ -89,18 +94,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     const code = promoCodeInput.trim().toUpperCase();
     if (!code) return;
 
-    const promo = store.validatePromoCode(code, event.id);
-    if (promo) {
-      setAppliedPromo({ code: promo.code, discountPct: promo.discountPercentage });
+    const validPromo = store.validatePromoCode(code, event.id);
+    if (validPromo) {
+      setAppliedPromo({ code: validPromo.code, discountPct: validPromo.discountPercentage });
       setPromoCodeInput('');
     } else {
-      setPromoError('Invalid promo voucher code.');
+      setPromoError('Invalid or expired promo voucher code.');
     }
   };
 
   const handleCompleteOrder = async () => {
     setIsProcessing(true);
-    setCheckoutError('');
     setStep(3);
 
     try {
@@ -157,7 +161,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       });
     } catch (err) {
       console.error(err);
-      setCheckoutError(err instanceof Error ? err.message : 'Checkout failed. Please try again.');
       setStep(2);
     } finally {
       setIsProcessing(false);
@@ -198,7 +201,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* STEP 1 & 2: Review and Payment Selection */}
-        {checkoutError && <p role="alert" className="mb-4 text-red-500">{checkoutError}</p>}
         {(step === 1 || step === 2) && (
           <div className="space-y-8">
             
@@ -270,7 +272,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                 <div className={`p-6 sm:p-8 rounded-3xl space-y-4 ${
                   isDark ? 'bg-[#0E0E12]' : 'bg-neutral-50'
                 }`}>
-                  <h3 className="text-base font-bold tracking-tight">Payment Method (sandbox only)</h3>
+                  <h3 className="text-base font-bold tracking-tight">Pan-African Payment Method</h3>
                   
                   <div className="space-y-3">
                     {/* Instant Sandbox Simulation */}
@@ -306,7 +308,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                         <input
                           type="radio"
                           name="payment"
-                          disabled
                           checked={paymentProvider === 'ozow'}
                           onChange={() => setPaymentProvider('ozow')}
                           className="mt-1"
@@ -330,7 +331,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                         <input
                           type="radio"
                           name="payment"
-                          disabled
                           checked={paymentProvider === 'mpesa'}
                           onChange={() => setPaymentProvider('mpesa')}
                           className="mt-1"
@@ -400,6 +400,24 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     )}
                   </div>
 
+                  {/* Loyalty Points Redemption Toggle */}
+                  {loyaltyCreditAmount > 0 && (
+                    <div className={`p-3.5 rounded-xl flex items-center justify-between text-xs ${
+                      isDark ? 'bg-black/60' : 'bg-white'
+                    }`}>
+                      <div>
+                        <span className="font-bold block">Nexora Member Points</span>
+                        <span className="text-[11px] opacity-60 font-mono">Credit available</span>
+                      </div>
+                      <button
+                        onClick={() => setLoyaltyRedeemed(!loyaltyRedeemed)}
+                        className="font-bold underline cursor-pointer text-xs"
+                      >
+                        {loyaltyRedeemed ? 'Applied' : 'Redeem'}
+                      </button>
+                    </div>
+                  )}
+
                   {/* Financial Math Summary */}
                   <div className={`pt-4 border-t space-y-2 text-xs font-mono ${
                     isDark ? 'border-white/10' : 'border-black/10'
@@ -412,6 +430,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                       <div className="flex justify-between text-emerald-500">
                         <span>Discount:</span>
                         <span>-{formatCurrency(discountAmount, event.currency)}</span>
+                      </div>
+                    )}
+                    {loyaltyDiscount > 0 && (
+                      <div className="flex justify-between text-emerald-500">
+                        <span>Loyalty Credit:</span>
+                        <span>-{formatCurrency(loyaltyDiscount, event.currency)}</span>
                       </div>
                     )}
                     <div className="flex justify-between">

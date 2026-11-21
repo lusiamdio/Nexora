@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { isSafeHttpsUrl, safeJsonParse, sanitizeSelfSignupRole } from './security';
 
 // Retrieve credentials with priority:
 // 1. Runtime rotated keys from sessionStorage/localStorage (if Super Admin rotated them in-session)
@@ -18,13 +19,15 @@ interface SupabaseConfig {
 function getInitialConfig(): SupabaseConfig {
   const saved = typeof window !== 'undefined' ? sessionStorage.getItem(STORAGE_KEY_CONFIG) : null;
   if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (parsed.url && parsed.anonKey) {
-        return parsed;
-      }
-    } catch {
-      // Fallback
+    const parsed = safeJsonParse<Partial<SupabaseConfig>>(saved, {});
+    if (parsed.url && parsed.anonKey && isSafeHttpsUrl(parsed.url)) {
+      return {
+        url: parsed.url,
+        anonKey: parsed.anonKey,
+        projectId: parsed.projectId || 'kunabampibfcmnbyjads',
+        rotatedAt: parsed.rotatedAt || new Date().toISOString(),
+        fingerprint: parsed.fingerprint || 'rotated',
+      };
     }
   }
 
@@ -84,7 +87,11 @@ export function isSupabaseConfigured(): boolean {
  * Recreates the Supabase client seamlessly.
  */
 export function rotateSupabaseKeys(newUrl?: string, newKey?: string, newProjectId?: string): { success: boolean; config: SupabaseConfig } {
-  const url = (newUrl || activeConfig.url).trim();
+  const candidateUrl = (newUrl || activeConfig.url).trim();
+  if (!isSafeHttpsUrl(candidateUrl)) {
+    throw new Error('Rejected unsafe Supabase URL. Must be a public HTTPS endpoint.');
+  }
+  const url = candidateUrl;
   const anonKey = (newKey || activeConfig.anonKey).trim();
   const projectId = (newProjectId || activeConfig.projectId || 'kunabampibfcmnbyjads').trim();
   const rotatedAt = new Date().toISOString();
@@ -155,6 +162,7 @@ export async function checkSupabaseHealth(): Promise<{
       headers: {
         apikey: activeConfig.anonKey,
       },
+      signal: AbortSignal.timeout(5000),
     })
       .then(async (res) => {
         if (res.ok) {
@@ -177,6 +185,7 @@ export async function checkSupabaseHealth(): Promise<{
         apikey: activeConfig.anonKey,
         Authorization: `Bearer ${activeConfig.anonKey}`,
       },
+      signal: AbortSignal.timeout(5000),
     })
       .then(async (res) => {
         if (res.ok) {
@@ -215,13 +224,14 @@ export async function supabaseSignUp(email: string, password: string, fullName: 
     throw new Error('Supabase is not configured with active credentials.');
   }
 
+  const safeRole = sanitizeSelfSignupRole(role);
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
         full_name: fullName,
-        role: role,
+        role: safeRole,
       },
     },
   });
@@ -257,6 +267,11 @@ export async function supabaseGetSession() {
   return data.session;
 }
 
+export async function supabaseGetAccessToken(): Promise<string | null> {
+  const session = await supabaseGetSession();
+  return session?.access_token ?? null;
+}
+
 // -------------------------------------------------------------
 // Database Synchronization Functions
 // -------------------------------------------------------------
@@ -279,6 +294,28 @@ export async function fetchLaunchGatesFromSupabase() {
     return data;
   } catch (err) {
     console.warn('Network error fetching launch gates:', err);
+    return null;
+  }
+}
+
+/**
+ * Fetches user profiles from public.profiles in Supabase
+ */
+export async function fetchProfilesFromSupabase() {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Supabase fetchProfiles error:', error);
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.warn('Network error fetching profiles:', err);
     return null;
   }
 }
@@ -333,15 +370,23 @@ export async function fetchEventsFromSupabase() {
  */
 export async function insertLedgerEntryInSupabase(entry: {
   order_id?: string;
-  transaction_ref?: string;
-  entry_type: string;
-  debit_account: string;
-  credit_account: string;
+  event_id?: string;
+  organizer_id?: string;
+  type:
+    | 'customer_clearing'
+    | 'organizer_payable'
+    | 'platform_commission'
+    | 'processing_fee'
+    | 'payout_transfer'
+    | 'refund_reserve'
+    | 'refund_reversal';
+  account_code: string;
+  account_name: string;
   debit_minor: number;
   credit_minor: number;
   currency: string;
   description: string;
-  metadata?: Record<string, any>;
+  reference: string;
 }) {
   if (!isSupabaseConfigured()) return null;
   try {
@@ -362,12 +407,27 @@ export async function insertLedgerEntryInSupabase(entry: {
 }
 
 /**
- * Checks in a ticket using the anti-passback function or table check
+ * Checks in a ticket using the anti-passback record_ticket_scan RPC (with safe table fallback)
  */
-export async function checkInTicketInSupabase(ticketCode: string, gateCode: string, staffProfileId?: string) {
+export async function checkInTicketInSupabase(
+  ticketCode: string,
+  gate: string,
+  staffName = 'Gate Officer',
+  scannerUserId?: string
+) {
   if (!isSupabaseConfigured()) return null;
   try {
-    // Call RPC or perform table check
+    const { data: rpcData, error: rpcError } = await supabase.rpc('record_ticket_scan', {
+      p_ticket_code: ticketCode,
+      p_staff_name: staffName,
+      p_gate: gate,
+      p_scanner_user_id: scannerUserId || null,
+    });
+
+    if (!rpcError && rpcData) {
+      return rpcData;
+    }
+
     const { data: ticket, error: ticketErr } = await supabase
       .from('tickets')
       .select('*')
@@ -375,37 +435,44 @@ export async function checkInTicketInSupabase(ticketCode: string, gateCode: stri
       .single();
 
     if (ticketErr || !ticket) {
-      return { success: false, reason: 'TICKET_NOT_FOUND' };
+      return { success: false, result: 'invalid', reason: 'TICKET_NOT_FOUND' };
     }
 
     if (ticket.status === 'checked_in') {
-      return { success: false, reason: 'ALREADY_CHECKED_IN', ticket };
+      return { success: false, result: 'already_checked_in', reason: 'ALREADY_CHECKED_IN', ticket };
     }
 
+    const checkedInAt = new Date().toISOString();
     const { data: updated, error: updateErr } = await supabase
       .from('tickets')
-      .update({ status: 'checked_in' })
+      .update({
+        status: 'checked_in',
+        checked_in_at: checkedInAt,
+        checked_in_by: staffName,
+        gate,
+      })
       .eq('id', ticket.id)
       .select()
       .single();
 
     if (updateErr) {
-      return { success: false, reason: 'UPDATE_FAILED', error: updateErr.message };
+      return { success: false, result: 'invalid', reason: 'UPDATE_FAILED', error: updateErr.message };
     }
 
-    // Insert audit check-in log
     await supabase.from('check_ins').insert([{
       ticket_id: ticket.id,
+      ticket_code: ticket.ticket_code,
       event_id: ticket.event_id,
-      scanned_by: staffProfileId || null,
-      gate_code: gateCode,
-      scan_type: 'entry',
-      result: 'success',
+      staff_name: staffName,
+      scanner_user_id: scannerUserId || null,
+      gate,
+      result: 'valid',
+      message: 'Access Granted: Verified Attendee Pass.',
     }]);
 
-    return { success: true, ticket: updated };
+    return { success: true, result: 'valid', ticket: updated };
   } catch (err: any) {
-    return { success: false, reason: 'NETWORK_ERROR', error: err.message };
+    return { success: false, result: 'invalid', reason: 'NETWORK_ERROR', error: err.message };
   }
 }
 

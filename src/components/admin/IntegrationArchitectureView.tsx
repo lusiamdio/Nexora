@@ -40,6 +40,7 @@ import {
   Info
 } from 'lucide-react';
 import { formatCurrency } from '../../lib/currencies';
+import { generateRandomHex } from '../../lib/security';
 
 interface IntegrationArchitectureViewProps {
   isDark: boolean;
@@ -649,7 +650,7 @@ export const IntegrationArchitectureView: React.FC<IntegrationArchitectureViewPr
       setSandboxLogs(prev => [
         `[${timestamp}] Initiating ${sandboxAction} on adapter [${sandboxProvider.toUpperCase()}]...`,
         `[${timestamp}] Resolving API route: POST /api/integrations/${sandboxProvider}/${sandboxAction}`,
-        `[${timestamp}] Signed with HMAC SHA-256; Nonce: nex_req_${Math.floor(Math.random() * 900000 + 100000)}`,
+        `[${timestamp}] Signed with HMAC SHA-256; Nonce: nex_req_${generateRandomHex(4)}`,
         `[${timestamp}] Upstream response: 200 OK (Latency: 124ms) - Status: COMPLETED`,
         `[${timestamp}] Nexora Event Bus: Emitted event "integration.adapter.success" to audit ledger.`,
         ...prev.slice(0, 8)

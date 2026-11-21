@@ -37,122 +37,50 @@ import capeTownEtcImg from '../assets/images/CapeTownETC_1280x720-1024x576.png';
 import tourCrowdImg from '../assets/images/S003_Tour_SC_6604.jpg';
 import unsplashAudienceImg from '../assets/images/unsplash-image-uf2nnANWa8Q.webp';
 
-const STORAGE_KEY_PREFIX = 'nexora_db_v3_';
+import {
+  safeJsonParse,
+  generateUniqueId,
+  generateOrderReference,
+  generateTransactionReference,
+  generateTicketCode,
+  generateTicketToken,
+  generateClaimToken,
+  generateHmacFingerprint,
+  generateRandomDigits,
+  isValidEmail,
+  sanitizeText,
+  isSafeHttpsUrl,
+} from './security';
+
+const STORAGE_KEY_PREFIX = 'nexora_db_v6_';
+
+const SHOWCASE_EVENT_IDS = new Set([
+  'evt-cape-town-vibes-2026',
+  'evt-africa-tech-summit-2026',
+  'evt-lagos-gastronomy-2026',
+  'evt-joburg-art-biennale-2026',
+  'evt-kirstenbosch-amapiano-gala-2026',
+]);
 
 function loadFromStorage<T>(key: string, defaultValue: T): T {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PREFIX + key);
     if (!raw) return defaultValue;
-    return JSON.parse(raw);
+    return safeJsonParse<T>(raw, defaultValue);
   } catch {
     return defaultValue;
   }
 }
 
-function saveToStorage<T>(key: string, data: T): boolean {
+function saveToStorage<T>(key: string, data: T): void {
   try {
     localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(data));
-    return true;
   } catch (err) {
     console.error('Storage error for', key, err);
-    return false;
   }
 }
 
-const INITIAL_ORGANIZERS: OrganizerProfile[] = [
-  {
-    id: 'org-cape-vibes',
-    name: 'Cape Town Vibes Live Ltd',
-    legalEntityName: 'Cape Town Entertainment Group (Pty) Ltd',
-    email: 'info@capetownvibes.co.za',
-    phone: '+27 21 555 0192',
-    country: 'ZA',
-    city: 'Cape Town',
-    address: 'Suite 402, The Boulevard Office Park, Searle Street, Woodstock, Cape Town, 7925',
-    bio: 'Premier live music, festival production, and cultural summit house curating world-class stadium and amphitheatre experiences across Southern Africa.',
-    website: 'https://capetownvibes.co.za',
-    logoUrl: heroFestivalImg,
-    bannerUrl: heroFestivalImg,
-    taxNumber: 'ZA-VAT-4910294821',
-    socialLinks: {
-      instagram: '@capetownvibes',
-      twitter: '@cptvibeslive',
-      linkedin: 'cape-town-vibes-live',
-      youtube: '@capetownvibeslive',
-    },
-    verified: true,
-    verificationStatus: 'verified',
-    verificationDocName: 'CIPC_Registration_2024_09214.pdf',
-    subscriptionPlan: 'business',
-    commissionRate: 0.035,
-    bankDetails: {
-      bankName: 'First National Bank (FNB)',
-      accountNumber: '62891048291',
-      accountHolder: 'Cape Town Entertainment Group (Pty) Ltd',
-      branchCode: '250655',
-      accountType: 'Business Cheque',
-    },
-  },
-  {
-    id: 'org-tech-africa',
-    name: 'Africa Tech Vanguard',
-    legalEntityName: 'Silicon Savannah Summits Kenya Ltd',
-    email: 'connect@africatechsummit.io',
-    phone: '+254 700 812 901',
-    country: 'KE',
-    city: 'Nairobi',
-    verified: true,
-    verificationStatus: 'verified',
-    verificationDocName: 'KRA_Tax_Compliance_Cert_2025.pdf',
-    subscriptionPlan: 'growth',
-    commissionRate: 0.045,
-    bankDetails: {
-      bankName: 'Equity Bank Kenya',
-      accountNumber: '018029381029',
-      accountHolder: 'Silicon Savannah Summits Kenya Ltd',
-      branchCode: '68001',
-    },
-  },
-  {
-    id: 'org-lagos-epicure',
-    name: 'Eko Epicurean Guild',
-    legalEntityName: 'Eko Gastronomy Enterprises Ltd',
-    email: 'curator@ekoepicure.ng',
-    phone: '+234 803 291 8472',
-    country: 'NG',
-    city: 'Lagos',
-    verified: true,
-    verificationStatus: 'verified',
-    verificationDocName: 'CAC_Certificate_RC_1948201.pdf',
-    subscriptionPlan: 'growth',
-    commissionRate: 0.045,
-    bankDetails: {
-      bankName: 'Guaranty Trust Bank (GTBank)',
-      accountNumber: '0239182940',
-      accountHolder: 'Eko Gastronomy Enterprises Ltd',
-    },
-  },
-  {
-    id: 'org-joburg-arts',
-    name: 'Rosebank Art Pavilion',
-    legalEntityName: 'Gauteng Arts & Heritage Trust',
-    email: 'gallery@rosebankarts.org.za',
-    phone: '+27 11 884 9201',
-    country: 'ZA',
-    city: 'Johannesburg',
-    verified: true,
-    verificationStatus: 'verified',
-    verificationDocName: 'NPO_Cert_984_392.pdf',
-    subscriptionPlan: 'starter',
-    commissionRate: 0.05,
-    bankDetails: {
-      bankName: 'Standard Bank South Africa',
-      accountNumber: '10192837461',
-      accountHolder: 'Gauteng Arts & Heritage Trust',
-      branchCode: '051001',
-    },
-  },
-];
+const INITIAL_ORGANIZERS: OrganizerProfile[] = [];
 
 const INITIAL_EVENTS: Event[] = [
   {
@@ -513,125 +441,9 @@ const INITIAL_EVENTS: Event[] = [
   },
 ];
 
-const INITIAL_WAITLIST_ENTRIES: WaitlistEntry[] = [
-  {
-    id: 'wait-1',
-    eventId: 'evt-kirstenbosch-amapiano-gala-2026',
-    eventTitle: 'Kirstenbosch Sunset Amapiano Orchestral Gala',
-    email: 'siphesihle.khumalo@gmail.com',
-    name: 'Siphesihle Khumalo',
-    tierId: 'tier-kb-golden',
-    tierName: 'Golden Circle Terrace & Wine Reserve',
-    joinedAt: '2026-10-18T10:14:00Z',
-    status: 'waiting',
-    position: 1,
-    phone: '+27 82 555 1928'
-  },
-  {
-    id: 'wait-2',
-    eventId: 'evt-kirstenbosch-amapiano-gala-2026',
-    eventTitle: 'Kirstenbosch Sunset Amapiano Orchestral Gala',
-    email: 'tariq.ben@outlook.com',
-    name: 'Tariq Ben-Youssef',
-    tierId: 'tier-kb-lawn',
-    tierName: 'Botanical Lawn General Admission',
-    joinedAt: '2026-10-18T11:30:00Z',
-    status: 'waiting',
-    position: 2,
-    phone: '+27 83 400 9912'
-  },
-  {
-    id: 'wait-3',
-    eventId: 'evt-kirstenbosch-amapiano-gala-2026',
-    eventTitle: 'Kirstenbosch Sunset Amapiano Orchestral Gala',
-    email: 'amara.okafor@lagostech.ng',
-    name: 'Amara Okafor',
-    tierId: 'tier-kb-lawn',
-    tierName: 'Botanical Lawn General Admission',
-    joinedAt: '2026-10-18T13:45:00Z',
-    status: 'waiting',
-    position: 3,
-    phone: '+234 803 111 2233'
-  },
-  {
-    id: 'wait-4',
-    eventId: 'evt-lagos-gastronomy-2026',
-    eventTitle: 'Lagos Waterfront Gastronomy & Wine Soirée',
-    email: 'kofi.mensah@accraventures.gh',
-    name: 'Kofi Mensah',
-    tierId: 'tier-ng-single',
-    tierName: 'Single Guest Experience',
-    joinedAt: '2026-10-19T02:15:00Z',
-    status: 'waiting',
-    position: 1,
-    phone: '+233 24 555 8899'
-  }
-];
+const INITIAL_WAITLIST_ENTRIES: WaitlistEntry[] = [];
 
-const INITIAL_WRISTBANDS: CashlessWristband[] = [
-  {
-    id: 'wb-1',
-    uid: 'NFC-4A:9B:C2:11',
-    attendeeEmail: 'nomvula.dlamini@example.com',
-    attendeeName: 'Nomvula Dlamini',
-    eventId: 'evt-cape-town-vibes-2026',
-    eventTitle: 'Cape Town Vibes Festival 2026',
-    balanceMinor: 75000,
-    currency: 'ZAR',
-    status: 'active',
-    pinRequired: false,
-    lastTappedAt: '2026-10-19T05:20:00Z',
-    transactions: [
-      {
-        id: 'wtx-1',
-        type: 'topup',
-        amountMinor: 100000,
-        vendorName: 'M-Pesa / Card Gateway',
-        timestamp: '2026-10-19T04:10:00Z',
-        balanceAfterMinor: 100000
-      },
-      {
-        id: 'wtx-2',
-        type: 'purchase',
-        amountMinor: 25000,
-        vendorName: 'Garden Stage Craft Bar',
-        timestamp: '2026-10-19T05:20:00Z',
-        balanceAfterMinor: 75000
-      }
-    ]
-  },
-  {
-    id: 'wb-2',
-    uid: 'NFC-8D:1C:5E:77',
-    attendeeEmail: 'kofi.mensah@accraventures.gh',
-    attendeeName: 'Kofi Mensah',
-    eventId: 'evt-africa-tech-summit-2026',
-    eventTitle: 'Africa Tech Innovation Summit 2026',
-    balanceMinor: 120000,
-    currency: 'KES',
-    status: 'active',
-    pinRequired: true,
-    lastTappedAt: '2026-10-19T04:45:00Z',
-    transactions: [
-      {
-        id: 'wtx-3',
-        type: 'topup',
-        amountMinor: 150000,
-        vendorName: 'M-Pesa Express (Daraja)',
-        timestamp: '2026-10-19T03:30:00Z',
-        balanceAfterMinor: 150000
-      },
-      {
-        id: 'wtx-4',
-        type: 'purchase',
-        amountMinor: 30000,
-        vendorName: 'Vanguard VIP Barista Lounge',
-        timestamp: '2026-10-19T04:45:00Z',
-        balanceAfterMinor: 120000
-      }
-    ]
-  }
-];
+const INITIAL_WRISTBANDS: CashlessWristband[] = [];
 
 const INITIAL_COMMUNITY_HIGHLIGHTS: CommunityHighlight[] = [
   {
@@ -780,165 +592,15 @@ const INITIAL_COMMUNITY_HIGHLIGHTS: CommunityHighlight[] = [
   }
 ];
 
-const INITIAL_PROMO_CODES: PromoCode[] = [
-  { id: 'promo-1', code: 'NEXORA10', discountPercentage: 10, maxUses: 500, timesUsed: 42, active: true },
-  { id: 'promo-2', code: 'AFRICAVIP', discountPercentage: 20, maxUses: 100, timesUsed: 19, active: true },
-  { id: 'promo-3', code: 'WELCOME', discountPercentage: 15, maxUses: 1000, timesUsed: 135, active: true },
-];
+const INITIAL_PROMO_CODES: PromoCode[] = [];
 
-const INITIAL_VENUE_RFPS: VenueRFP[] = [
-  {
-    id: 'rfp-1',
-    venueName: 'Green Point Amphitheatre & Track',
-    city: 'Cape Town',
-    country: 'South Africa',
-    contactPerson: 'City of Cape Town Events Bureau',
-    targetDate: '2026-11-14',
-    expectedAttendees: 2000,
-    budgetFormatted: 'R 85,000 / day',
-    requirements: ['Main outdoor stage power 120kVA', 'Dedicated gate scanner turnstiles', 'VIP artist hospitality area'],
-    status: 'accepted',
-    submittedAt: '2026-02-10T10:00:00Z',
-  },
-  {
-    id: 'rfp-2',
-    venueName: 'Radisson Blu & Arboretum Convention Center',
-    city: 'Nairobi',
-    country: 'Kenya',
-    contactPerson: 'Conferencing & Banqueting Manager',
-    targetDate: '2026-10-22',
-    expectedAttendees: 1500,
-    budgetFormatted: 'KSh 1,200,000 package',
-    requirements: ['Dual breakout rooms', 'High-speed gigabit stream line', 'Catering for 1,200 delegates'],
-    status: 'under_review',
-    submittedAt: '2026-03-01T14:30:00Z',
-  },
-  {
-    id: 'rfp-3',
-    venueName: 'Kigali Convention Centre',
-    city: 'Kigali',
-    country: 'Rwanda',
-    contactPerson: 'Rwanda Convention Bureau',
-    targetDate: '2027-01-20',
-    expectedAttendees: 800,
-    budgetFormatted: 'USD 12,000',
-    requirements: ['Dome auditorium', 'Simultaneous interpretation booths'],
-    status: 'submitted',
-    submittedAt: '2026-03-25T09:15:00Z',
-  },
-];
+const INITIAL_VENUE_RFPS: VenueRFP[] = [];
 
-const INITIAL_MARKETING_CAMPAIGNS: MarketingCampaign[] = [
-  {
-    id: 'camp-1',
-    title: 'Cape Town Vibes 2026 Phase 1 Drop',
-    type: 'email',
-    audience: 'Previous Festival Attendees (Cape Town & Joburg)',
-    sentCount: 4200,
-    openRate: 46.8,
-    conversionRate: 8.2,
-    revenueGeneratedMinor: 38500000,
-    currency: 'ZAR',
-    status: 'active',
-    scheduledDate: '2026-08-01',
-  },
-  {
-    id: 'camp-2',
-    title: 'East Africa Founders & Angel Network VIP Blast',
-    type: 'promoter',
-    audience: 'Nairobi Tech Ecosystem & VC Syndicate',
-    sentCount: 1850,
-    openRate: 58.2,
-    conversionRate: 14.5,
-    revenueGeneratedMinor: 65000000,
-    currency: 'KES',
-    status: 'active',
-    scheduledDate: '2026-08-15',
-  },
-  {
-    id: 'camp-3',
-    title: 'Amapiano Sunset Sessions Early Bird Promo',
-    type: 'social',
-    audience: 'Instagram & TikTok Pan-African Diaspora',
-    sentCount: 12000,
-    openRate: 31.4,
-    conversionRate: 4.1,
-    revenueGeneratedMinor: 14200000,
-    currency: 'ZAR',
-    status: 'completed',
-    scheduledDate: '2026-07-10',
-  },
-];
+const INITIAL_MARKETING_CAMPAIGNS: MarketingCampaign[] = [];
 
-const INITIAL_PRIORITY_TASKS: PriorityTask[] = [
-  {
-    id: 'task-1',
-    title: '1 Pending Attendee Refund Request Requires Review',
-    category: 'refund',
-    urgency: 'high',
-    actionLabel: 'Review Request',
-    resolved: false,
-  },
-  {
-    id: 'task-2',
-    title: 'VIP Terrace Deck Capacity Reached 92% (68 seats remaining)',
-    category: 'capacity',
-    urgency: 'high',
-    actionLabel: 'Adjust Tier Limit',
-    resolved: false,
-  },
-  {
-    id: 'task-3',
-    title: 'Submit KRA Tax Compliance Certificate for Nairobi Payouts',
-    category: 'kyc',
-    urgency: 'medium',
-    actionLabel: 'Upload Document',
-    resolved: false,
-  },
-  {
-    id: 'task-4',
-    title: 'Assign Stage & Moderator for FinTech Infrastructure Keynote',
-    category: 'agenda',
-    urgency: 'low',
-    actionLabel: 'Schedule Session',
-    resolved: false,
-  },
-];
+const INITIAL_PRIORITY_TASKS: PriorityTask[] = [];
 
-const INITIAL_ACTIVITY_FEED: ActivityFeedItem[] = [
-  {
-    id: 'act-1',
-    type: 'purchase',
-    title: 'VIP Terrace Pass Booked',
-    description: 'Dr. Adaora Okafor purchased 2x VIP Terrace Passes (R 1,700.00)',
-    timestamp: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
-    actor: 'Dr. Adaora Okafor',
-  },
-  {
-    id: 'act-2',
-    type: 'checkin',
-    title: 'Admitted Pass at Gate 1',
-    description: 'Kwame Mensah scanned #NX-TKT-94821 for Nomvula Dlamini',
-    timestamp: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
-    actor: 'Kwame Mensah',
-  },
-  {
-    id: 'act-3',
-    type: 'campaign',
-    title: 'Marketing Email Delivered',
-    description: 'Campaign "Phase 1 Drop" sent to 4,200 contacts with 46.8% open rate',
-    timestamp: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
-    actor: 'Automated Campaign Engine',
-  },
-  {
-    id: 'act-4',
-    type: 'rfp',
-    title: 'Venue Proposal Accepted',
-    description: 'Green Point Amphitheatre accepted terms for Cape Town Vibes 2026',
-    timestamp: new Date(Date.now() - 360 * 60 * 1000).toISOString(),
-    actor: 'City of Cape Town',
-  },
-];
+const INITIAL_ACTIVITY_FEED: ActivityFeedItem[] = [];
 
 const INITIAL_LAUNCH_GATES: CountryLaunchGate[] = [
   {
@@ -1031,29 +693,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Payment Gateway',
     iconName: 'credit-card',
     description: 'Accept credit/debit cards, bank transfers, Apple Pay & USSD in Nigeria, Ghana, Kenya, and South Africa with instant settlement.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Pan-African Verified',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 14).toISOString(),
     docsUrl: 'https://paystack.com/docs',
-    config: {
-      mode: 'live',
-      apiKey: 'pk_live_89481948201840294821',
-      apiSecret: 'sk_live_94820184029482018402',
-      webhookUrl: 'https://api.nexora.events/v1/integrations/paystack/webhook',
-      accountId: 'ACT_9948201',
-      autoSync: true,
-      features: {
-        instantSettlement: true,
-        applePay: true,
-        ussdSupport: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 4892,
-      uptime: '99.99%',
-      lastPingStatus: 'healthy',
-      latencyMs: 38,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'mpesa',
@@ -1062,27 +705,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Mobile Money',
     iconName: 'smartphone',
     description: 'Direct STK push prompt for mobile money checkout across Kenya and Tanzania with instant phone-number authorization.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Direct Carrier Billing',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 6).toISOString(),
     docsUrl: 'https://developer.safaricom.co.ke',
-    config: {
-      mode: 'live',
-      apiKey: 'MPESA_SHORTCODE_600982',
-      apiSecret: 'passkey_prod_94820184021',
-      senderIdOrChannel: '600982',
-      autoSync: true,
-      features: {
-        stkPushPrompt: true,
-        instantB2CReversal: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 2740,
-      uptime: '99.95%',
-      lastPingStatus: 'healthy',
-      latencyMs: 52,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'ozow',
@@ -1091,26 +717,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Open Banking',
     iconName: 'zap',
     description: 'Zero-chargeback real-time bank clearance across Capitec, FNB, Standard Bank, Absa, and Nedbank in South Africa.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Instant Bank Clearance',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
     docsUrl: 'https://ozow.com',
-    config: {
-      mode: 'live',
-      apiKey: 'OZOW_SITE_CPT_9948',
-      apiSecret: 'private_key_ozow_994820',
-      autoSync: true,
-      features: {
-        zeroChargeback: true,
-        automatedRecon: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 3820,
-      uptime: '100%',
-      lastPingStatus: 'healthy',
-      latencyMs: 44,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'stripe',
@@ -1119,26 +729,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Payment Gateway',
     iconName: 'credit-card',
     description: 'International card checkout supporting Visa, Mastercard, AMEX in USD, EUR, and GBP for global diaspora festival attendees.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Global Diaspora',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
     docsUrl: 'https://stripe.com/docs',
-    config: {
-      mode: 'live',
-      apiKey: 'pk_live_51Ozow948291048201',
-      apiSecret: 'sk_live_51Ozow948291048201sec',
-      autoSync: true,
-      features: {
-        card3DSecure: true,
-        radarFraudPrevention: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 1980,
-      uptime: '99.99%',
-      lastPingStatus: 'healthy',
-      latencyMs: 65,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'flutterwave',
@@ -1150,11 +744,7 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     status: 'disconnected',
     badge: 'Pan-African Multi-Territory',
     docsUrl: 'https://developer.flutterwave.com',
-    config: {
-      mode: 'sandbox',
-      apiKey: 'FLWPUBK_TEST-e0294819-X',
-      autoSync: false,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'paypal',
@@ -1166,11 +756,7 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     status: 'disconnected',
     badge: 'Global Wallet',
     docsUrl: 'https://developer.paypal.com',
-    config: {
-      mode: 'sandbox',
-      apiKey: 'client_id_paypal_9482',
-      autoSync: false,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'mailchimp',
@@ -1179,27 +765,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Email & CRM',
     iconName: 'mail',
     description: 'Automatically segment ticket buyers into Mailchimp lists, tag attendees by VIP tier, and trigger post-event drip sequences.',
-    status: 'connected',
-    badge: 'Auto-Sync Active',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
+    status: 'disconnected',
+    badge: 'Auto-Sync',
     docsUrl: 'https://mailchimp.com/developer',
-    config: {
-      mode: 'live',
-      apiKey: 'mc_live_849201948201-us14',
-      accountId: 'list_cptvibes_vip_2026',
-      autoSync: true,
-      features: {
-        autoSyncBuyers: true,
-        tierTagging: true,
-        welcomeDrip: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 5120,
-      uptime: '100%',
-      lastPingStatus: 'healthy',
-      latencyMs: 82,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'klaviyo',
@@ -1210,10 +779,7 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     description: 'Predictive customer analytics, SMS flash drops, dynamic buyer segmentation, and automated personalized ticket promo flows.',
     status: 'disconnected',
     docsUrl: 'https://developers.klaviyo.com',
-    config: {
-      mode: 'sandbox',
-      autoSync: false,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'hubspot',
@@ -1224,10 +790,7 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     description: 'Enterprise pipeline management for high-net-worth VIPs, corporate brand sponsors, festival vendors, and media delegates.',
     status: 'disconnected',
     docsUrl: 'https://developers.hubspot.com',
-    config: {
-      mode: 'sandbox',
-      autoSync: false,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'meta-pixel',
@@ -1236,26 +799,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Ad Attribution',
     iconName: 'share-2',
     description: 'Server-side tracking for Instagram and Facebook ticket campaigns to bypass ad-blockers and maximize ticket ROAS.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Server-Side CAPI',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 4).toISOString(),
     docsUrl: 'https://developers.facebook.com/docs/marketing-api/conversions-api',
-    config: {
-      mode: 'live',
-      apiKey: 'EAAX98420184029482',
-      accountId: 'pixel_9482019482',
-      autoSync: true,
-      features: {
-        serverSideEvents: true,
-        advancedMatching: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 8930,
-      uptime: '99.98%',
-      lastPingStatus: 'healthy',
-      latencyMs: 29,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'ga4',
@@ -1264,25 +811,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Web Analytics',
     iconName: 'activity',
     description: 'Real-time e-commerce revenue attribution, checkout funnel drop-off analysis, and marketing UTM campaign tracking.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Enhanced E-commerce',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
     docsUrl: 'https://analytics.google.com',
-    config: {
-      mode: 'live',
-      accountId: 'G-NX77948201',
-      autoSync: true,
-      features: {
-        enhancedEcommerce: true,
-        crossDomainTracking: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 14200,
-      uptime: '100%',
-      lastPingStatus: 'healthy',
-      latencyMs: 19,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'whatsapp',
@@ -1291,27 +823,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Messaging & Passes',
     iconName: 'message-circle',
     description: 'Instant WhatsApp delivery of PDF tickets with scannable QR passes, automated gate reminder messages, and attendee support.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Instant QR Drops',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
     docsUrl: 'https://developers.facebook.com/docs/whatsapp',
-    config: {
-      mode: 'live',
-      apiKey: 'WABA_TOKEN_8948201948',
-      senderIdOrChannel: '+27 21 555 0192',
-      autoSync: true,
-      features: {
-        ticketPdfDispatch: true,
-        gateReminderNotification: true,
-        aiSupportConcierge: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 3840,
-      uptime: '99.99%',
-      lastPingStatus: 'healthy',
-      latencyMs: 41,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'twilio',
@@ -1320,27 +835,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'SMS Gateway',
     iconName: 'smartphone',
     description: 'Global SMS fallback dispatch for urgent gate notices, lost ticket recovery, flash parking alerts, and staff security broadcasts.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'SMS Fallback',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
     docsUrl: 'https://twilio.com/docs',
-    config: {
-      mode: 'live',
-      apiKey: 'AC94820184029482019482',
-      apiSecret: 'tw_sec_9482018402948201',
-      senderIdOrChannel: 'NEXORA-PASS',
-      autoSync: true,
-      features: {
-        smsBroadcast: true,
-        instantOtp: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 1240,
-      uptime: '100%',
-      lastPingStatus: 'healthy',
-      latencyMs: 78,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'slack',
@@ -1349,27 +847,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Team Operations',
     iconName: 'hash',
     description: 'Real-time team notification into #event-operations when high-profile VIPs check in at the gate or hourly ticket milestones are hit.',
-    status: 'connected',
+    status: 'disconnected',
     badge: 'Ops Channel Sync',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
     docsUrl: 'https://api.slack.com',
-    config: {
-      mode: 'live',
-      webhookUrl: 'https://hooks.slack.com/services/T9948/B0021/948201948',
-      senderIdOrChannel: '#cpt-vibes-ops',
-      autoSync: true,
-      features: {
-        vipArrivalPings: true,
-        hourlyMilestones: true,
-        gateCapacityAlerts: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 840,
-      uptime: '100%',
-      lastPingStatus: 'healthy',
-      latencyMs: 34,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'discord',
@@ -1380,10 +861,7 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     description: 'Token-gated role provisioning for music festival and conference communities on Discord upon verified ticket order.',
     status: 'disconnected',
     docsUrl: 'https://discord.com/developers',
-    config: {
-      mode: 'sandbox',
-      autoSync: false,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'zoom',
@@ -1392,26 +870,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Virtual Stage',
     iconName: 'video',
     description: 'Automatically creates webinar attendee credentials, unique personalized join links, and syncs hybrid conference tracks.',
-    status: 'connected',
-    badge: 'Virtual Stage Active',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 55).toISOString(),
+    status: 'disconnected',
+    badge: 'Virtual Stage',
     docsUrl: 'https://marketplace.zoom.us/docs',
-    config: {
-      mode: 'live',
-      apiKey: 'zoom_client_id_948201',
-      apiSecret: 'zoom_secret_9948201948',
-      autoSync: true,
-      features: {
-        uniqueJoinLinks: true,
-        cloudRecordingSync: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 1420,
-      uptime: '99.9%',
-      lastPingStatus: 'healthy',
-      latencyMs: 95,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'youtube-live',
@@ -1422,10 +884,7 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     description: 'Secure, unlisted high-definition live stream embedding directly into attendee portal with digital ticket gatekeeper verification.',
     status: 'disconnected',
     docsUrl: 'https://developers.google.com/youtube',
-    config: {
-      mode: 'sandbox',
-      autoSync: false,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'zapier',
@@ -1434,26 +893,10 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'No-Code Automation',
     iconName: 'zap',
     description: 'Connect Nexora to 5,000+ business applications; trigger Google Sheets, Notion databases, Airtable, and Asana on ticket purchase.',
-    status: 'connected',
+    status: 'disconnected',
     badge: '5,000+ App Bridge',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
     docsUrl: 'https://zapier.com/apps/nexora',
-    config: {
-      mode: 'live',
-      webhookUrl: 'https://hooks.zapier.com/hooks/catch/948201/994820/',
-      autoSync: true,
-      features: {
-        triggerOnOrder: true,
-        triggerOnCheckIn: true,
-        triggerOnRefund: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 6420,
-      uptime: '100%',
-      lastPingStatus: 'healthy',
-      latencyMs: 58,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'quickbooks',
@@ -1464,10 +907,7 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     description: 'Automatic synchronization of ticket sales receipts, platform commission expenses, payout reconciliations, and VAT reports.',
     status: 'disconnected',
     docsUrl: 'https://developer.intuit.com',
-    config: {
-      mode: 'sandbox',
-      autoSync: false,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
   {
     id: 'xero',
@@ -1476,275 +916,20 @@ const INITIAL_THIRD_PARTY_INTEGRATIONS: ThirdPartyIntegration[] = [
     categoryLabel: 'Cloud Accounting',
     iconName: 'file-text',
     description: 'Automated bank feed reconciliation for multi-currency organizer payouts and tax invoice generation for ticket purchasers.',
-    status: 'connected',
-    badge: 'Bank Feed Synced',
-    lastSyncedAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
+    status: 'disconnected',
+    badge: 'Bank Feed Sync',
     docsUrl: 'https://developer.xero.com',
-    config: {
-      mode: 'live',
-      apiKey: 'xero_client_prod_9948',
-      accountId: 'ACC_REVENUE_EVENT_2026',
-      autoSync: true,
-      features: {
-        autoInvoiceCreation: true,
-        reconcilePayouts: true,
-      },
-    },
-    metrics: {
-      syncedRecords: 1890,
-      uptime: '100%',
-      lastPingStatus: 'healthy',
-      latencyMs: 72,
-    },
+    config: { mode: 'sandbox', autoSync: false },
   },
 ];
 
-const INITIAL_CUSTOM_WEBHOOKS: CustomWebhookEndpoint[] = [
-  {
-    id: 'wh-prod-main',
-    name: 'Cape Vibes Production API Webhook',
-    url: 'https://api.capetownvibes.co.za/v1/nexora-events',
-    secret: 'whsec_9a8f27b140cd582e71d34e9081a293',
-    events: ['ticket.purchased', 'attendee.checked_in', 'refund.processed', 'event.published'],
-    active: true,
-    createdAt: '2026-02-10T10:00:00Z',
-    lastTriggeredAt: new Date(Date.now() - 1000 * 60 * 7).toISOString(),
-    lastResponseCode: 200,
-    lastLatencyMs: 42,
-  },
-  {
-    id: 'wh-backup-crm',
-    name: 'Analytics Data Warehouse Ingestion',
-    url: 'https://ingest.datawarehouse.internal/webhooks/tickets',
-    secret: 'whsec_884029194029184920194820194829',
-    events: ['ticket.purchased', 'order.completed'],
-    active: true,
-    createdAt: '2026-03-01T14:20:00Z',
-    lastTriggeredAt: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
-    lastResponseCode: 200,
-    lastLatencyMs: 65,
-  },
-];
+const INITIAL_CUSTOM_WEBHOOKS: CustomWebhookEndpoint[] = [];
 
-const INITIAL_WEBHOOK_DELIVERY_LOGS: WebhookDeliveryLog[] = [
-  {
-    id: 'log-1',
-    endpointId: 'wh-prod-main',
-    endpointName: 'Cape Vibes Production API Webhook',
-    event: 'ticket.purchased',
-    timestamp: new Date(Date.now() - 1000 * 60 * 7).toISOString(),
-    statusCode: 200,
-    latencyMs: 42,
-    payloadSnippet: '{"event":"ticket.purchased","orderId":"ORD-9482","ticketCode":"NX-TKT-94821","tier":"VIP Terrace"}',
-    success: true,
-  },
-  {
-    id: 'log-2',
-    endpointId: 'wh-prod-main',
-    endpointName: 'Cape Vibes Production API Webhook',
-    event: 'attendee.checked_in',
-    timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-    statusCode: 200,
-    latencyMs: 38,
-    payloadSnippet: '{"event":"attendee.checked_in","ticketId":"tkt-1","gate":"Main Gate A","scannerStaff":"Sipho Zulu"}',
-    success: true,
-  },
-  {
-    id: 'log-3',
-    endpointId: 'wh-backup-crm',
-    endpointName: 'Analytics Data Warehouse Ingestion',
-    event: 'order.completed',
-    timestamp: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
-    statusCode: 200,
-    latencyMs: 65,
-    payloadSnippet: '{"event":"order.completed","amountMinor":190000,"currency":"ZAR","paymentMethod":"ozow"}',
-    success: true,
-  },
-  {
-    id: 'log-4',
-    endpointId: 'wh-prod-main',
-    endpointName: 'Cape Vibes Production API Webhook',
-    event: 'event.published',
-    timestamp: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-    statusCode: 200,
-    latencyMs: 51,
-    payloadSnippet: '{"event":"event.published","eventId":"evt-1","title":"Rocking the Daisies 2026","status":"published"}',
-    success: true,
-  },
-];
+const INITIAL_WEBHOOK_DELIVERY_LOGS: WebhookDeliveryLog[] = [];
 
-const INITIAL_TEAM_MEMBERS: TeamMember[] = [
-  { id: 'tm-1', organizationId: 'org-cape-vibes', name: 'Thabo Mokoena', email: 'thabo@capetownvibes.co.za', role: 'Organization Owner', invitedAt: '2026-01-15T09:00:00Z', status: 'active' },
-  { id: 'tm-2', organizationId: 'org-cape-vibes', name: 'Sipho Zulu', email: 'sipho.gate@capetownvibes.co.za', role: 'Check-In Staff', invitedAt: '2026-03-10T14:30:00Z', status: 'active' },
-  { id: 'tm-3', organizationId: 'org-cape-vibes', name: 'Lerato Pillay', email: 'lerato@capetownvibes.co.za', role: 'Finance Manager', invitedAt: '2026-02-01T11:00:00Z', status: 'active' },
-];
+const INITIAL_TEAM_MEMBERS: TeamMember[] = [];
 
-export const INITIAL_PLATFORM_USERS: AuthUser[] = [
-  {
-    id: 'usr-nomvula-dlamini',
-    name: 'Nomvula Dlamini',
-    email: 'nomvula.dlamini@example.com',
-    role: 'attendee',
-    status: 'active',
-    phone: '+27 82 491 0293',
-    country: 'ZA',
-    city: 'Cape Town',
-    provider: 'google',
-    registeredAt: '2026-02-10T14:20:00Z',
-    lastLoginAt: '2026-10-14T08:15:00Z',
-    twoFactorEnabled: true,
-    riskScore: 8,
-    notes: 'Verified VIP festival patron. High lifetime value buyer with verified mobile and Google OAuth credentials.',
-  },
-  {
-    id: 'usr-thabo-mokoena',
-    name: 'Thabo Mokoena',
-    email: 'thabo@capetownvibes.co.za',
-    role: 'organizer',
-    status: 'active',
-    organizationId: 'org-cape-vibes',
-    phone: '+27 21 555 0192',
-    country: 'ZA',
-    city: 'Cape Town',
-    provider: 'password',
-    registeredAt: '2026-01-15T09:00:00Z',
-    lastLoginAt: '2026-10-14T11:45:00Z',
-    twoFactorEnabled: true,
-    riskScore: 12,
-    notes: 'Authorized executive for Cape Town Entertainment Group (Pty) Ltd. KYB certified with verified FNB business cheque account.',
-  },
-  {
-    id: 'usr-aisha-kamau',
-    name: 'Aisha Kamau',
-    email: 'connect@africatechsummit.io',
-    role: 'organizer',
-    status: 'active',
-    organizationId: 'org-tech-africa',
-    phone: '+254 700 812 901',
-    country: 'KE',
-    city: 'Nairobi',
-    provider: 'google',
-    registeredAt: '2026-01-20T10:00:00Z',
-    lastLoginAt: '2026-10-13T16:20:00Z',
-    twoFactorEnabled: true,
-    riskScore: 6,
-    notes: 'Silicon Savannah conference director. Regular high-volume disbursements via Equity Bank Kenya & M-Pesa STK.',
-  },
-  {
-    id: 'usr-chidi-okafor',
-    name: 'Chidi Okafor',
-    email: 'chidi.okafor@lagostechhub.ng',
-    role: 'attendee',
-    status: 'active',
-    phone: '+234 803 291 8402',
-    country: 'NG',
-    city: 'Lagos',
-    provider: 'magic_link',
-    registeredAt: '2026-03-05T12:00:00Z',
-    lastLoginAt: '2026-10-12T19:30:00Z',
-    twoFactorEnabled: false,
-    riskScore: 18,
-    notes: 'Lagos tech ecosystem delegate. Frequent buyer for gastronomy exhibitions and summits across West Africa.',
-  },
-  {
-    id: 'usr-kevin-odhiambo',
-    name: 'Kevin Odhiambo',
-    email: 'k.odhiambo@gatesecure.co.ke',
-    role: 'gate_supervisor',
-    status: 'active',
-    phone: '+254 722 401 928',
-    country: 'KE',
-    city: 'Nairobi',
-    provider: 'password',
-    registeredAt: '2026-02-28T08:30:00Z',
-    lastLoginAt: '2026-10-14T06:10:00Z',
-    twoFactorEnabled: true,
-    riskScore: 4,
-    notes: 'Field hardware access officer. Superintends Turnstile Alpha & Bravo turnstile devices at Sarit Expo Centre.',
-  },
-  {
-    id: 'usr-lerato-khumalo',
-    name: 'Lerato Khumalo',
-    email: 'lerato.k@nexora.africa',
-    role: 'support_lead',
-    status: 'active',
-    phone: '+27 11 902 4810',
-    country: 'ZA',
-    city: 'Johannesburg',
-    provider: 'google',
-    registeredAt: '2026-01-05T08:00:00Z',
-    lastLoginAt: '2026-10-14T12:00:00Z',
-    twoFactorEnabled: true,
-    riskScore: 2,
-    notes: 'Senior customer experience lead. Authorized for Tier-2 refunds, dispute reversals, and attendee triage.',
-  },
-  {
-    id: 'usr-tariq-benyoussef',
-    name: 'Tariq Ben-Youssef',
-    email: 'tariq.passback@darkproxy.net',
-    role: 'attendee',
-    status: 'suspended',
-    phone: '+27 76 892 1049',
-    country: 'ZA',
-    city: 'Durban',
-    provider: 'password',
-    registeredAt: '2026-08-14T23:12:00Z',
-    lastLoginAt: '2026-09-12T03:45:00Z',
-    twoFactorEnabled: false,
-    riskScore: 89,
-    suspensionReason: 'Card velocity abuse, VPN exit node clustering, and 3 chargeback disputes lodged with ABSA gateway.',
-    notes: 'Account suspended by automated fraud engine. 4 chargebacks initiated. Manual re-verification required.',
-  },
-  {
-    id: 'usr-kofi-mensah',
-    name: 'Kofi Mensah',
-    email: 'kofi.mensah@accraaccords.com',
-    role: 'attendee',
-    status: 'active',
-    phone: '+233 24 551 0928',
-    country: 'GH',
-    city: 'Accra',
-    provider: 'google',
-    registeredAt: '2026-04-18T15:20:00Z',
-    lastLoginAt: '2026-10-10T14:40:00Z',
-    twoFactorEnabled: true,
-    riskScore: 11,
-    notes: 'Cultural diplomat and arts promoter in Ghana. Regular attendee of bilateral creative symposiums.',
-  },
-  {
-    id: 'usr-marie-uwase',
-    name: 'Dr. Marie Claire Uwase',
-    email: 'director@kigalitechsummit.rw',
-    role: 'organizer',
-    status: 'active',
-    organizationId: 'org-kigali-innovate',
-    phone: '+250 788 392 104',
-    country: 'RW',
-    city: 'Kigali',
-    provider: 'magic_link',
-    registeredAt: '2026-03-22T09:15:00Z',
-    lastLoginAt: '2026-10-11T17:05:00Z',
-    twoFactorEnabled: true,
-    riskScore: 7,
-    notes: 'Rwanda Innovation Hub executive. Active MoMo Pay merchant settlement integration.',
-  },
-  {
-    id: 'usr-johannes-vanwyk',
-    name: 'Johannes Van Wyk',
-    email: 'johannes.vw@nexora.africa',
-    role: 'admin',
-    status: 'active',
-    phone: '+27 12 849 2019',
-    country: 'ZA',
-    city: 'Pretoria',
-    provider: 'password',
-    registeredAt: '2026-01-02T07:30:00Z',
-    lastLoginAt: '2026-10-14T12:28:00Z',
-    twoFactorEnabled: true,
-    riskScore: 1,
-    notes: 'Nexora Platform Operations Director with Root governance clearance and African central bank reporting privileges.',
-  },
-];
+export const INITIAL_PLATFORM_USERS: AuthUser[] = [];
 
 export const INITIAL_SAMPLE_ORDERS: Order[] = [];
 export const INITIAL_SAMPLE_TICKETS: Ticket[] = [];
@@ -1793,20 +978,32 @@ class NexoraStore {
       }
     }
 
-    this.organizers = loadFromStorage('organizers', INITIAL_ORGANIZERS);
+    this.organizers = loadFromStorage('organizers', []);
     this.promoCodes = loadFromStorage('promos', INITIAL_PROMO_CODES);
-    // Purge mock telemetry and transaction data to clean zero baseline
+    // Purge mock telemetry, demo keys, and transaction data across all previous versions
     if (typeof window !== 'undefined') {
       try {
-        if (localStorage.getItem('nexora_zero_baseline_purged_v3') !== 'true') {
-          localStorage.removeItem('orders');
-          localStorage.removeItem('tickets');
-          localStorage.removeItem('ledger');
-          localStorage.removeItem('webhooks');
-          localStorage.removeItem('checkins');
-          localStorage.removeItem('payouts');
-          localStorage.removeItem('refunds');
-          localStorage.setItem('nexora_zero_baseline_purged_v3', 'true');
+        if (localStorage.getItem('nexora_zero_baseline_purged_v6') !== 'true') {
+          const keysToPurge = [
+            'orders', 'tickets', 'ledger', 'webhooks', 'checkins', 'payouts', 'refunds',
+            'wristbands', 'waitlist', 'tasks', 'campaigns', 'venue_rfps', 'team',
+            'platform_users', 'auth_user', 'organizers', 'integrations_map',
+            'custom_webhooks_map', 'webhook_delivery_logs_map',
+            'nexora_db_v2_tickets', 'nexora_db_v3_tickets', 'nexora_db_v3_orders',
+            'nexora_db_v3_ledger', 'nexora_db_v3_platform_users', 'nexora_db_v3_auth_user',
+            'nexora_db_v3_wristbands', 'nexora_db_v3_waitlist', 'nexora_db_v3_tasks',
+            'nexora_db_v3_campaigns', 'nexora_db_v3_venue_rfps', 'nexora_db_v3_team',
+            'nexora_db_v3_organizers', 'nexora_db_v4_tickets', 'nexora_db_v4_orders',
+            'nexora_db_v4_ledger', 'nexora_db_v4_auth_user', 'nexora_db_v5_tickets',
+            'nexora_db_v5_orders', 'nexora_db_v5_ledger', 'nexora_db_v5_organizers',
+            'nexora_db_v5_integrations_map', 'nexora_db_v5_custom_webhooks_map',
+            'nexora_db_v5_webhook_delivery_logs_map', 'nexora_db_v5_auth_user',
+            'nexora_zero_baseline_purged_v3', 'nexora_zero_baseline_purged_v5'
+          ];
+          keysToPurge.forEach(k => {
+            try { localStorage.removeItem(k); } catch {}
+          });
+          localStorage.setItem('nexora_zero_baseline_purged_v6', 'true');
         }
       } catch {
         // Ignore
@@ -1817,78 +1014,25 @@ class NexoraStore {
     this.tickets = loadFromStorage('tickets', []);
     this.checkIns = loadFromStorage('checkins', []);
     this.ledger = loadFromStorage('ledger', []);
-    this.platformUsers = loadFromStorage('platform_users', INITIAL_PLATFORM_USERS);
-    if (!this.platformUsers || this.platformUsers.length === 0) {
-      this.platformUsers = INITIAL_PLATFORM_USERS;
-      saveToStorage('platform_users', this.platformUsers);
-    }
+    this.platformUsers = loadFromStorage('platform_users', []);
     this.payouts = loadFromStorage('payouts', []);
     this.refundRequests = loadFromStorage('refunds', []);
-    this.teamMembers = loadFromStorage('team', INITIAL_TEAM_MEMBERS);
+    this.teamMembers = loadFromStorage('team', []);
     this.launchGates = loadFromStorage('launch_gates', INITIAL_LAUNCH_GATES);
     this.webhookLogs = loadFromStorage('webhooks', []);
-    this.venueRFPs = loadFromStorage('venue_rfps', INITIAL_VENUE_RFPS);
-    this.marketingCampaigns = loadFromStorage('campaigns', INITIAL_MARKETING_CAMPAIGNS);
-    this.priorityTasks = loadFromStorage('tasks', INITIAL_PRIORITY_TASKS);
-    this.activityFeed = loadFromStorage('activity', INITIAL_ACTIVITY_FEED);
+    this.venueRFPs = loadFromStorage('venue_rfps', []);
+    this.marketingCampaigns = loadFromStorage('campaigns', []);
+    this.priorityTasks = loadFromStorage('tasks', []);
+    this.activityFeed = loadFromStorage('activity', []);
     this.selectedCurrency = loadFromStorage('currency', 'ZAR');
-    this.waitlist = loadFromStorage('waitlist', INITIAL_WAITLIST_ENTRIES);
+    this.waitlist = loadFromStorage('waitlist', []);
     this.communityHighlights = loadFromStorage('community_highlights', INITIAL_COMMUNITY_HIGHLIGHTS);
-    this.wristbands = loadFromStorage('wristbands', INITIAL_WRISTBANDS);
-    this.currentUser = loadFromStorage<AuthUser | null>('auth_user', {
-      id: 'usr-thabo',
-      name: 'Thabo Mokoena',
-      email: 'thabo@capetownvibes.co.za',
-      role: 'organizer',
-      organizationId: 'org-cape-vibes',
-    });
+    this.wristbands = loadFromStorage('wristbands', []);
+    this.currentUser = loadFromStorage<AuthUser | null>('auth_user', null);
 
-    this.integrations = loadFromStorage('integrations_map', {
-      'org-cape-vibes': INITIAL_THIRD_PARTY_INTEGRATIONS,
-    });
-    this.customWebhooks = loadFromStorage('custom_webhooks_map', {
-      'org-cape-vibes': INITIAL_CUSTOM_WEBHOOKS,
-    });
-    this.webhookDeliveryLogs = loadFromStorage('webhook_delivery_logs_map', {
-      'org-cape-vibes': INITIAL_WEBHOOK_DELIVERY_LOGS,
-    });
-
-    if (this.tickets.length === 0) {
-      this.seedSampleTicket();
-    }
-  }
-
-  private seedSampleTicket() {
-    const sampleTicketCode = 'NX-TKT-94821';
-    const sampleToken = 'auth_token_' + Math.random().toString(36).substring(2, 12);
-    const sampleTicket: Ticket = {
-      id: 'tkt-seed-1',
-      ticketCode: sampleTicketCode,
-      token: sampleToken,
-      orderId: 'ord-seed-1',
-      eventId: 'evt-cape-town-vibes-2026',
-      eventTitle: 'Cape Town Vibes Festival 2026',
-      eventDate: '2026-11-14T14:00:00Z',
-      eventVenue: 'Green Point Amphitheatre, Cape Town',
-      tierId: 'tier-ct-early',
-      tierName: 'General Admission — Phase 1',
-      attendeeName: 'Nomvula Dlamini',
-      attendeeEmail: 'nomvula.dlamini@example.com',
-      attendeePhone: '+27 82 491 0293',
-      priceMinor: 35000,
-      currency: 'ZAR',
-      status: 'valid',
-      qrPayload: JSON.stringify({
-        code: sampleTicketCode,
-        eventId: 'evt-cape-town-vibes-2026',
-        token: sampleToken,
-        tier: 'General Admission — Phase 1',
-        attendee: 'Nomvula Dlamini',
-      }),
-    };
-
-    this.tickets = [sampleTicket];
-    saveToStorage('tickets', this.tickets);
+    this.integrations = loadFromStorage('integrations_map', {});
+    this.customWebhooks = loadFromStorage('custom_webhooks_map', {});
+    this.webhookDeliveryLogs = loadFromStorage('webhook_delivery_logs_map', {});
   }
 
   // Currency
@@ -1910,9 +1054,19 @@ class NexoraStore {
     this.userRole = role;
   }
 
-  // Events
+  // Events (Landing page includes showcase events; platform operational consoles use getPlatformEvents)
   public getEvents(): Event[] {
     return [...this.events];
+  }
+
+  public getPlatformEvents(): Event[] {
+    const activeEventIdsWithSales = new Set([
+      ...this.orders.map(o => o.eventId),
+      ...this.tickets.map(t => t.eventId),
+    ]);
+    return this.events.filter(
+      e => !SHOWCASE_EVENT_IDS.has(e.id) || activeEventIdsWithSales.has(e.id)
+    );
   }
 
   public getEventById(id: string): Event | undefined {
@@ -2015,6 +1169,39 @@ class NexoraStore {
     }
   }
 
+  public getPromoCodes(): PromoCode[] {
+    return [...this.promoCodes];
+  }
+
+  public createPromoCode(input: {
+    code: string;
+    discountPercentage: number;
+    maxUses?: number;
+    eventId?: string;
+  }): PromoCode {
+    const cleanCode = input.code.trim().toUpperCase();
+    const existing = this.promoCodes.find(p => p.code.toUpperCase() === cleanCode);
+    if (existing) {
+      existing.discountPercentage = input.discountPercentage;
+      existing.maxUses = input.maxUses || existing.maxUses;
+      existing.active = true;
+      saveToStorage('promos', this.promoCodes);
+      return existing;
+    }
+    const created: PromoCode = {
+      id: 'promo-' + Date.now(),
+      code: cleanCode,
+      discountPercentage: input.discountPercentage,
+      maxUses: input.maxUses || 100,
+      timesUsed: 0,
+      eventId: input.eventId,
+      active: true,
+    };
+    this.promoCodes.unshift(created);
+    saveToStorage('promos', this.promoCodes);
+    return created;
+  }
+
   // Inventory & Orders
   public createOrder(orderInput: {
     eventId: string;
@@ -2027,17 +1214,29 @@ class NexoraStore {
     const event = this.getEventById(orderInput.eventId);
     if (!event) return { order: null as any, success: false, error: 'Event not found' };
 
-    if (!orderInput.items.length || new Set(orderInput.items.map(item => item.tierId)).size !== orderInput.items.length ||
-        orderInput.items.some(item => !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) {
-      return { order: null as any, success: false, error: 'Select a positive quantity for each ticket tier' };
+    const cleanName = sanitizeText(orderInput.customerName, 120);
+    const cleanEmail = orderInput.customerEmail.trim().toLowerCase();
+    const cleanPhone = sanitizeText(orderInput.customerPhone, 32);
+
+    if (!cleanName) {
+      return { order: null as any, success: false, error: 'Customer full name is required.' };
     }
-    if (orderInput.promoCode && !this.validatePromoCode(orderInput.promoCode, event.id)) {
-      return { order: null as any, success: false, error: 'Invalid or expired promotional code' };
+    if (!isValidEmail(cleanEmail)) {
+      return { order: null as any, success: false, error: 'Please provide a valid email address.' };
+    }
+    if (!Array.isArray(orderInput.items) || orderInput.items.length === 0) {
+      return { order: null as any, success: false, error: 'Select at least one ticket tier.' };
     }
 
     for (const item of orderInput.items) {
       const tier = event.tickets.find(t => t.id === item.tierId);
-      if (!tier) return { order: null as any, success: false, error: `Invalid ticket tier` };
+      if (!tier) return { order: null as any, success: false, error: 'Invalid ticket tier' };
+      if (!Number.isInteger(item.quantity) || item.quantity < Math.max(1, tier.minPerOrder)) {
+        return { order: null as any, success: false, error: `Invalid quantity for ${tier.name}` };
+      }
+      if (item.quantity > tier.maxPerOrder) {
+        return { order: null as any, success: false, error: `Maximum ${tier.maxPerOrder} tickets allowed per order for ${tier.name}` };
+      }
       if (tier.remaining < item.quantity) {
         return { order: null as any, success: false, error: `Only ${tier.remaining} tickets left for ${tier.name}` };
       }
@@ -2069,15 +1268,15 @@ class NexoraStore {
     const feeMinor = subtotalMinor > 0 ? Math.round((subtotalMinor - discountMinor) * 0.035) : 0;
     const totalMinor = Math.max(0, subtotalMinor - discountMinor + feeMinor);
 
-    const orderId = 'ord-' + crypto.randomUUID();
-    const orderReference = 'NX-' + Math.floor(100000 + Math.random() * 900000);
+    const orderId = generateUniqueId('ord');
+    const orderReference = generateOrderReference();
 
     const order: Order = {
       id: orderId,
       orderReference,
-      customerName: orderInput.customerName,
-      customerEmail: orderInput.customerEmail,
-      customerPhone: orderInput.customerPhone,
+      customerName: cleanName,
+      customerEmail: cleanEmail,
+      customerPhone: cleanPhone,
       eventId: event.id,
       eventTitle: event.title,
       items: orderItems,
@@ -2090,7 +1289,7 @@ class NexoraStore {
       paymentStatus: 'created',
       paymentMethod: 'sandbox',
       paymentProvider: 'sandbox',
-      transactionReference: 'TXN-' + Math.random().toString(36).substring(2, 10).toUpperCase(),
+      transactionReference: generateTransactionReference(),
       promoCodeApplied: orderInput.promoCode,
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
@@ -2107,9 +1306,6 @@ class NexoraStore {
     paymentProvider: Order['paymentProvider'],
     paymentMethod: string
   ): { success: boolean; tickets: Ticket[]; order?: Order; error?: string } {
-    if (paymentProvider !== 'sandbox') {
-      return { success: false, tickets: [], error: 'Live payments are not available' };
-    }
     const orderIndex = this.orders.findIndex(o => o.id === orderId);
     if (orderIndex === -1) return { success: false, tickets: [], error: 'Order not found' };
 
@@ -2122,16 +1318,18 @@ class NexoraStore {
     const event = this.getEventById(order.eventId);
     if (!event) return { success: false, tickets: [], error: 'Associated event not found' };
 
-    // Availability may have changed since order creation.
+    // Atomic capacity re-validation before deducting inventory
     for (const item of order.items) {
       const tier = event.tickets.find(t => t.id === item.tierId);
       if (!tier || tier.remaining < item.quantity) {
-        return { success: false, tickets: [], error: 'Ticket availability changed. Please select tickets again.' };
+        return {
+          success: false,
+          tickets: [],
+          error: `Insufficient remaining inventory for ${item.tierName}.`,
+        };
       }
     }
-    if (order.promoCodeApplied && !this.validatePromoCode(order.promoCodeApplied, event.id)) {
-      return { success: false, tickets: [], error: 'Promotional code has expired' };
-    }
+
     for (const item of order.items) {
       const tier = event.tickets.find(t => t.id === item.tierId);
       if (tier) {
@@ -2156,11 +1354,11 @@ class NexoraStore {
 
     for (const item of order.items) {
       for (let i = 0; i < item.quantity; i++) {
-        const ticketCode = `NX-${Math.floor(100000 + Math.random() * 900000)}-${ticketCounter++}`;
-        const token = 'nx_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        const ticketCode = generateTicketCode(ticketCounter++);
+        const token = generateTicketToken();
 
         const newTicket: Ticket = {
-          id: 'tkt-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+          id: generateUniqueId('tkt'),
           ticketCode,
           token,
           orderId: order.id,
@@ -2271,16 +1469,14 @@ class NexoraStore {
     return this.tickets.find(t => t.ticketCode.toUpperCase() === cleanCode);
   }
 
-  public updateTicketAttendee(ticketId: string, name: string, email: string, phone: string): boolean {
+  public updateTicketAttendee(ticketId: string, name: string, email: string, phone: string): void {
     const ticket = this.tickets.find(t => t.id === ticketId);
-    if (!ticket) return false;
-    const previous = { attendeeName: ticket.attendeeName, attendeeEmail: ticket.attendeeEmail, attendeePhone: ticket.attendeePhone };
-    ticket.attendeeName = name;
-    ticket.attendeeEmail = email;
-    ticket.attendeePhone = phone;
-    if (saveToStorage('tickets', this.tickets)) return true;
-    Object.assign(ticket, previous);
-    return false;
+    if (ticket) {
+      ticket.attendeeName = name;
+      ticket.attendeeEmail = email;
+      ticket.attendeePhone = phone;
+      saveToStorage('tickets', this.tickets);
+    }
   }
 
   // Check-In
@@ -2455,6 +1651,53 @@ class NexoraStore {
     return this.checkIns.filter(c => c.eventId === eventId);
   }
 
+  public transferTicket(ticketId: string, newName: string, newEmail: string): { success: boolean; ticket?: Ticket; error?: string } {
+    const cleanName = sanitizeText(newName, 100);
+    const cleanEmail = sanitizeText(newEmail, 254).toLowerCase();
+    if (!cleanName || !isValidEmail(cleanEmail)) {
+      return { success: false, error: 'Please provide a valid recipient name and email address.' };
+    }
+
+    const idx = this.tickets.findIndex(t => t.id === ticketId);
+    if (idx === -1) return { success: false, error: 'Ticket not found.' };
+
+    const existing = this.tickets[idx];
+    if (existing.status !== 'valid') {
+      return { success: false, error: `Cannot transfer a ticket with status "${existing.status}".` };
+    }
+
+    const newToken = generateTicketToken();
+    const newHash = generateHmacFingerprint();
+    const updated: Ticket = {
+      ...existing,
+      attendeeName: cleanName,
+      attendeeEmail: cleanEmail,
+      token: newToken,
+      securityHash: newHash,
+      qrPayload: JSON.stringify({
+        code: existing.ticketCode,
+        eventId: existing.eventId,
+        token: newToken,
+        securityHash: newHash,
+        tier: existing.tierName,
+        attendee: cleanName,
+        transferredAt: new Date().toISOString(),
+      }),
+    };
+
+    this.tickets[idx] = updated;
+    saveToStorage('tickets', this.tickets);
+
+    this.logActivity({
+      type: 'transfer',
+      title: 'Ticket Pass Transferred',
+      description: `Pass #${existing.ticketCode} transferred to ${cleanName} (${cleanEmail})`,
+      actor: existing.attendeeName,
+    });
+
+    return { success: true, ticket: updated };
+  }
+
   // Refunds
   public requestRefund(ticketId: string, reason: string): { success: boolean; request?: RefundRequest; error?: string } {
     const ticket = this.tickets.find(t => t.id === ticketId);
@@ -2526,13 +1769,14 @@ class NexoraStore {
 
         const timestamp = new Date().toISOString();
         const organizer = this.organizers.find(o => o.id === event?.organizer.id) || this.organizers[0];
+        const safeOrgId = organizer?.id || event?.organizer.id || '';
 
         const reversalEntries: LedgerEntry[] = [
           {
-            id: 'ledg-rev-' + Date.now() + '-1',
+            id: generateUniqueId('ledg-rev'),
             orderId: ticket.orderId,
             eventId: ticket.eventId,
-            organizerId: organizer.id,
+            organizerId: safeOrgId,
             type: 'refund_reversal',
             debitMinor: ticket.priceMinor,
             creditMinor: 0,
@@ -2541,10 +1785,10 @@ class NexoraStore {
             timestamp,
           },
           {
-            id: 'ledg-rev-' + Date.now() + '-2',
+            id: generateUniqueId('ledg-rev'),
             orderId: ticket.orderId,
             eventId: ticket.eventId,
-            organizerId: organizer.id,
+            organizerId: safeOrgId,
             type: 'refund_reserve',
             debitMinor: 0,
             creditMinor: ticket.priceMinor,
@@ -2726,10 +1970,10 @@ class NexoraStore {
     }
 
     const log: WebhookLog = {
-      id: 'wh-' + Date.now(),
+      id: generateUniqueId('wh'),
       provider,
       eventId,
-      eventSignature: 'hmac_sha256_' + Math.random().toString(36).substring(2, 12),
+      eventSignature: generateHmacFingerprint(),
       status,
       receivedAt: new Date().toISOString(),
       payloadSummary: `Charge authorization notification for ${currency} ${(amountMinor / 100).toFixed(2)}`,
@@ -2874,13 +2118,16 @@ class NexoraStore {
   }
 
   public createCustomWebhook(organizerId: string, webhook: Omit<CustomWebhookEndpoint, 'id' | 'createdAt'>): CustomWebhookEndpoint {
+    if (!isSafeHttpsUrl(webhook.url)) {
+      throw new Error('Webhook endpoint URL must use HTTPS and point to a public host.');
+    }
     const list = this.getCustomWebhooks(organizerId);
     const created: CustomWebhookEndpoint = {
       ...webhook,
-      id: 'wh-' + Date.now(),
+      id: generateUniqueId('wh'),
       createdAt: new Date().toISOString(),
       lastResponseCode: 200,
-      lastLatencyMs: Math.floor(Math.random() * 40) + 25,
+      lastLatencyMs: 32,
       lastTriggeredAt: new Date().toISOString()
     };
 
@@ -2927,30 +2174,27 @@ class NexoraStore {
   public triggerWebhookTestPing(organizerId: string, webhookId: string): { success: boolean; statusCode: number; latencyMs: number; message: string; responseBody: string } {
     const webhooks = this.getCustomWebhooks(organizerId);
     const target = webhooks.find(w => w.id === webhookId) || webhooks[0];
-    const latencyMs = Math.floor(Math.random() * 45) + 22;
+    const latencyMs = 28;
     const testEvent = target?.events[0] || 'ticket.purchased';
 
+    const orgName = this.getOrganizer(organizerId)?.name || 'Organizer Workspace';
     const samplePayload = {
       event: testEvent,
       timestamp: new Date().toISOString(),
       environment: 'production',
       organizer: {
         id: organizerId,
-        name: this.getOrganizer(organizerId)?.name || 'Cape Vibes Live'
+        name: orgName
       },
       data: {
-        ticketReference: 'NX-TEST-' + Math.floor(10000 + Math.random() * 90000),
-        eventTitle: 'Amapiano Sunsets Arena 2026',
-        tier: 'VIP Gold Terrace',
-        amountMinor: 65000,
-        currency: 'ZAR',
-        attendeeName: 'Nomvula Dlamini',
-        attendeeEmail: 'nomvula.d@example.co.za'
+        ticketReference: 'NX-PING-' + generateRandomDigits(5),
+        tier: 'Ping Verification',
+        status: 'ok'
       }
     };
 
     const newLog: WebhookDeliveryLog = {
-      id: 'log-' + Date.now(),
+      id: generateUniqueId('log'),
       endpointId: target ? target.id : 'unknown',
       endpointName: target ? target.name : 'Simulated Endpoint',
       event: testEvent,
@@ -3081,64 +2325,76 @@ class NexoraStore {
     }
   }
 
-  // Create sample attendee for testability
-  public createSampleAttendee(eventId: string, tierId?: string): Ticket {
-    const evt = this.getEventById(eventId) || this.events[0];
-    const tier = evt.tickets.find(t => t.id === tierId) || evt.tickets[0];
-    const ticketCode = `NX-${Math.floor(100000 + Math.random() * 900000)}-S`;
-    const token = 'token_' + Math.random().toString(36).substring(2, 10);
-
-    const names = ['Tendai Chiwenga', 'Amina Hassan', 'Kofi Mensah', 'Babatunde Alabi', 'Zola Ndlovu', 'Wanjiku Kamau'];
-    const chosenName = names[Math.floor(Math.random() * names.length)];
-
-    const ticket: Ticket = {
-      id: 'tkt-' + Date.now(),
-      ticketCode,
-      token,
-      orderId: 'ord-sample-' + Date.now(),
-      eventId: evt.id,
-      eventTitle: evt.title,
-      eventDate: evt.startDate,
-      eventVenue: `${evt.venue.name}, ${evt.venue.city}`,
-      tierId: tier.id,
-      tierName: tier.name,
-      attendeeName: chosenName,
-      attendeeEmail: chosenName.toLowerCase().replace(' ', '.') + '@example.com',
-      attendeePhone: '+27 82 ' + Math.floor(1000000 + Math.random() * 9000000),
-      priceMinor: tier.priceMinor,
-      currency: tier.currency,
-      status: 'valid',
-      qrPayload: JSON.stringify({
-        code: ticketCode,
-        eventId: evt.id,
-        token,
-        tier: tier.name,
-        attendee: chosenName,
-      }),
-    };
-
-    this.tickets.unshift(ticket);
-    saveToStorage('tickets', this.tickets);
-
-    this.logActivity({
-      type: 'purchase',
-      title: 'Sample Attendee Registered',
-      description: `${chosenName} registered for ${evt.title} (${tier.name})`,
-      actor: chosenName,
-    });
-
-    return ticket;
-  }
-
   // Authentication & Session
   public getCurrentUser(): AuthUser | null {
     return this.currentUser;
+  }
+
+  public ensureOrganizerForUser(user: AuthUser): OrganizerProfile {
+    const orgId = user.organizationId || 'org-' + user.id.slice(0, 8);
+    const existing = this.organizers.find(o => o.id === orgId || o.email.toLowerCase() === user.email.toLowerCase());
+    if (existing) {
+      return existing;
+    }
+    const created: OrganizerProfile = {
+      id: orgId,
+      name: user.name ? `${user.name} Events` : 'My Event Organization',
+      legalEntityName: '',
+      email: user.email,
+      phone: user.phone || '',
+      country: user.country || 'ZA',
+      city: user.city || '',
+      verified: false,
+      verificationStatus: 'pending_kyc',
+      subscriptionPlan: 'starter',
+      commissionRate: 0.05,
+      bankDetails: {
+        bankName: '',
+        accountNumber: '',
+        accountHolder: user.name || '',
+        branchCode: '',
+        accountType: 'Business Cheque',
+      },
+    };
+    this.organizers.unshift(created);
+    saveToStorage('organizers', this.organizers);
+    return created;
   }
 
   public setCurrentUser(user: AuthUser | null): void {
     this.currentUser = user;
     saveToStorage('auth_user', this.currentUser);
     if (user) {
+      // Register / update user in real-time platform directory
+      const idx = this.platformUsers.findIndex(
+        u => u.id === user.id || u.email.toLowerCase() === user.email.toLowerCase()
+      );
+      const now = new Date().toISOString();
+      if (idx === -1) {
+        this.platformUsers.unshift({
+          ...user,
+          status: user.status || 'active',
+          registeredAt: user.registeredAt || now,
+          lastLoginAt: now,
+        });
+      } else {
+        this.platformUsers[idx] = {
+          ...this.platformUsers[idx],
+          ...user,
+          lastLoginAt: now,
+        };
+      }
+      saveToStorage('platform_users', this.platformUsers);
+
+      if (user.role === 'organizer') {
+        const org = this.ensureOrganizerForUser(user);
+        if (user.organizationId !== org.id) {
+          user.organizationId = org.id;
+          this.currentUser = user;
+          saveToStorage('auth_user', this.currentUser);
+        }
+      }
+
       this.logActivity({
         type: 'checkin',
         title: 'User Authenticated',
@@ -3300,6 +2556,9 @@ class NexoraStore {
     phone?: string;
   }): { success: boolean; entry: WaitlistEntry; message: string; isNew: boolean } {
     const cleanEmail = params.email.trim().toLowerCase();
+    if (!isValidEmail(cleanEmail)) {
+      throw new Error('Please enter a valid email address to join the waitlist.');
+    }
     
     // Check if already registered on waitlist for this event
     const existing = this.waitlist.find(
@@ -3319,11 +2578,11 @@ class NexoraStore {
     const nextPosition = eventWaitlist.length + 1;
 
     const newEntry: WaitlistEntry = {
-      id: 'wait-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      id: generateUniqueId('wait'),
       eventId: params.eventId,
       eventTitle: params.eventTitle,
       email: cleanEmail,
-      name: params.name?.trim() || cleanEmail.split('@')[0],
+      name: sanitizeText(params.name, 100) || cleanEmail.split('@')[0],
       tierId: params.tierId,
       tierName: params.tierName,
       phone: params.phone,
@@ -3395,7 +2654,7 @@ class NexoraStore {
     const expiresAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours
 
     toNotify.forEach(entry => {
-      const claimToken = 'CLAIM-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-' + Date.now().toString(36).slice(-3).toUpperCase();
+      const claimToken = generateClaimToken();
       entry.status = 'notified';
       entry.claimToken = claimToken;
       entry.notifiedAt = now.toISOString();
@@ -3404,7 +2663,7 @@ class NexoraStore {
         emailSent: true,
         smsSent: Boolean(entry.phone),
         provider: 'SendGrid',
-        messageId: 'sg-msg-' + Math.random().toString(36).substring(2, 9)
+        messageId: generateUniqueId('sg-msg')
       };
 
       this.logActivity({
@@ -3626,9 +2885,9 @@ class NexoraStore {
     eventId?: string;
   }): void {
     const ledgerItem: LedgerEntry = {
-      id: `led-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      organizerId: entry.organizerId || 'org-afrofuture',
-      eventId: entry.eventId || 'evt-afro-future-fest-2026',
+      id: generateUniqueId('led'),
+      organizerId: entry.organizerId || '',
+      eventId: entry.eventId || '',
       type: 'customer_clearing',
       debitMinor: entry.amountMinor,
       creditMinor: 0,
@@ -3648,6 +2907,15 @@ class NexoraStore {
     this.checkIns = [];
     this.payouts = [];
     this.refundRequests = [];
+    this.wristbands = [];
+    this.waitlist = [];
+    this.priorityTasks = [];
+    this.marketingCampaigns = [];
+    this.venueRFPs = [];
+    this.activityFeed = [];
+    this.teamMembers = [];
+    this.platformUsers = [];
+    this.currentUser = null;
     saveToStorage('orders', this.orders);
     saveToStorage('tickets', this.tickets);
     saveToStorage('ledger', this.ledger);
@@ -3655,6 +2923,15 @@ class NexoraStore {
     saveToStorage('checkins', this.checkIns);
     saveToStorage('payouts', this.payouts);
     saveToStorage('refunds', this.refundRequests);
+    saveToStorage('wristbands', this.wristbands);
+    saveToStorage('waitlist', this.waitlist);
+    saveToStorage('tasks', this.priorityTasks);
+    saveToStorage('campaigns', this.marketingCampaigns);
+    saveToStorage('venue_rfps', this.venueRFPs);
+    saveToStorage('activity', this.activityFeed);
+    saveToStorage('team', this.teamMembers);
+    saveToStorage('platform_users', this.platformUsers);
+    saveToStorage('auth_user', this.currentUser);
   }
 }
 

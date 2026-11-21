@@ -24,6 +24,7 @@ import {
 import { Event, Ticket } from '../../types';
 import { store } from '../../lib/store';
 import { formatCurrency, formatEventDate } from '../../lib/currencies';
+import { downloadSafeCsv } from '../../lib/security';
 
 interface EventPerformanceModalProps {
   event: Event;
@@ -48,8 +49,6 @@ export const EventPerformanceModal: React.FC<EventPerformanceModalProps> = ({
   onLaunchScanner,
   onViewPublic,
 }) => {
-  if (!isOpen) return null;
-
   const [activeTab, setActiveTab] = useState<'tiers' | 'attendees' | 'financials' | 'management'>('tiers');
   const [attendeeSearch, setAttendeeSearch] = useState('');
   const [attendeeStatusFilter, setAttendeeStatusFilter] = useState<string>('all');
@@ -121,6 +120,8 @@ export const EventPerformanceModal: React.FC<EventPerformanceModalProps> = ({
     });
   }, [eventTickets, attendeeStatusFilter, attendeeSearch]);
 
+  if (!isOpen) return null;
+
   const handleExportCSV = () => {
     const headers = ['Ticket Code', 'Attendee Name', 'Email', 'Tier', 'Status', 'Price', 'Checked In'];
     const rows = eventTickets.map(t => [
@@ -132,14 +133,7 @@ export const EventPerformanceModal: React.FC<EventPerformanceModalProps> = ({
       (t.priceMinor / 100).toFixed(2),
       t.checkedInAt || 'Not Checked In',
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${event.slug}-attendees.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadSafeCsv(`${event.slug || event.id}-attendees.csv`, headers, rows);
   };
 
   const handleCopyEventLink = () => {

@@ -25,6 +25,7 @@ import {
 import { Event, TicketTier } from '../../types';
 import { formatCurrency, formatEventDate } from '../../lib/currencies';
 import { store } from '../../lib/store';
+import { downloadSafeCsv } from '../../lib/security';
 
 interface EventPerformancePageProps {
   event: Event;
@@ -81,23 +82,15 @@ export const EventPerformancePage: React.FC<EventPerformancePageProps> = ({
   };
 
   const handleExportCSV = (type: string) => {
-    const data = event.tickets.map(t => ({
-      Tier: t.name,
-      Price: (t.priceMinor / 100).toFixed(2),
-      Sold: t.capacity - t.remaining,
-      Remaining: t.remaining,
-      Revenue: (((t.capacity - t.remaining) * t.priceMinor) / 100).toFixed(2),
-    }));
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      ['Tier,Price,Sold,Remaining,Revenue', ...data.map(d => Object.values(d).join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${event.slug || 'event'}-${type}-report.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const headers = ['Tier', 'Price', 'Sold', 'Remaining', 'Revenue'];
+    const rows = event.tickets.map(t => [
+      t.name,
+      (t.priceMinor / 100).toFixed(2),
+      t.capacity - t.remaining,
+      t.remaining,
+      (((t.capacity - t.remaining) * t.priceMinor) / 100).toFixed(2),
+    ]);
+    downloadSafeCsv(`${event.slug || 'event'}-${type}-report.csv`, headers, rows);
   };
 
   return (

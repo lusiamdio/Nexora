@@ -57,33 +57,33 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
   // Brand identity
   const [name, setName] = useState(organizer.name);
   const [legalEntityName, setLegalEntityName] = useState(organizer.legalEntityName);
-  const [bio, setBio] = useState(organizer.bio || 'Premier event curation company delivering high-impact cultural spectacles.');
-  const [website, setWebsite] = useState(organizer.website || 'https://nexora.events');
+  const [bio, setBio] = useState(organizer.bio || '');
+  const [website, setWebsite] = useState(organizer.website || '');
   const [logoUrl, setLogoUrl] = useState(organizer.logoUrl || heroFestivalImg);
   const [bannerUrl, setBannerUrl] = useState(organizer.bannerUrl || heroFestivalImg);
 
   // Social links
-  const [instagram, setInstagram] = useState(organizer.socialLinks?.instagram || '@capetownvibes');
-  const [twitter, setTwitter] = useState(organizer.socialLinks?.twitter || '@cptvibeslive');
-  const [linkedin, setLinkedin] = useState(organizer.socialLinks?.linkedin || 'cape-town-vibes');
-  const [youtube, setYoutube] = useState(organizer.socialLinks?.youtube || '@capetownvibeslive');
+  const [instagram, setInstagram] = useState(organizer.socialLinks?.instagram || '');
+  const [twitter, setTwitter] = useState(organizer.socialLinks?.twitter || '');
+  const [linkedin, setLinkedin] = useState(organizer.socialLinks?.linkedin || '');
+  const [youtube, setYoutube] = useState(organizer.socialLinks?.youtube || '');
 
   // Contact & Location
   const [email, setEmail] = useState(organizer.email);
   const [phone, setPhone] = useState(organizer.phone);
   const [country, setCountry] = useState(organizer.country);
   const [city, setCity] = useState(organizer.city);
-  const [address, setAddress] = useState(organizer.address || 'Suite 402, The Boulevard Office Park, Woodstock, Cape Town');
+  const [address, setAddress] = useState(organizer.address || '');
 
   // Banking
   const [bankName, setBankName] = useState(organizer.bankDetails.bankName);
   const [accountNumber, setAccountNumber] = useState(organizer.bankDetails.accountNumber);
   const [accountHolder, setAccountHolder] = useState(organizer.bankDetails.accountHolder);
-  const [branchCode, setBranchCode] = useState(organizer.bankDetails.branchCode || '250655');
+  const [branchCode, setBranchCode] = useState(organizer.bankDetails.branchCode || '');
   const [accountType, setAccountType] = useState(organizer.bankDetails.accountType || 'Business Cheque');
 
   // Legal
-  const [taxNumber, setTaxNumber] = useState(organizer.taxNumber || 'ZA-VAT-4910294821');
+  const [taxNumber, setTaxNumber] = useState(organizer.taxNumber || '');
 
   // Status feedback
   const [saving, setSaving] = useState(false);

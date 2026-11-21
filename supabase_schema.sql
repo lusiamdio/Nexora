@@ -455,9 +455,9 @@ CREATE TABLE IF NOT EXISTS public.tickets (
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.check_ins (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  ticket_id UUID NOT NULL REFERENCES public.tickets(id) ON DELETE CASCADE,
+  ticket_id UUID REFERENCES public.tickets(id) ON DELETE CASCADE,
   ticket_code TEXT NOT NULL,
-  event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES public.events(id) ON DELETE CASCADE,
   staff_name TEXT NOT NULL,
   scanner_user_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
   gate TEXT NOT NULL,
@@ -734,8 +734,31 @@ CREATE INDEX IF NOT EXISTS idx_audit_created_at ON public.audit_logs(created_at)
 -- 5.1 USER PROFILE AUTOMATION TRIGGER (Supabase auth.users -> public.profiles)
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+SECURITY DEFINER
+SET search_path = public, auth, pg_temp
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_role public.user_role := 'attendee';
+  v_name TEXT;
+  v_role_str TEXT;
 BEGIN
+  -- Safe name extraction (supports full_name, name, or email prefix)
+  v_name := COALESCE(
+    NEW.raw_user_meta_data->>'full_name',
+    NEW.raw_user_meta_data->>'name',
+    split_part(NEW.email, '@', 1),
+    'New Member'
+  );
+
+  -- Restrict self-registration strictly to attendee or organizer (privileged roles assigned server-side/admin only)
+  v_role_str := LOWER(COALESCE(NEW.raw_user_meta_data->>'role', 'attendee'));
+  IF v_role_str = 'organizer' THEN
+    v_role := 'organizer'::public.user_role;
+  ELSE
+    v_role := 'attendee'::public.user_role;
+  END IF;
+
   INSERT INTO public.profiles (
     id,
     name,
@@ -747,27 +770,31 @@ BEGIN
     updated_at
   ) VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+    v_name,
     NEW.email,
-    CASE WHEN NEW.raw_user_meta_data->>'role' = 'organizer' THEN 'organizer'::user_role ELSE 'attendee'::user_role END,
+    v_role,
     NEW.raw_user_meta_data->>'avatar_url',
     COALESCE(NEW.raw_user_meta_data->>'country', 'ZA'),
-    timezone('utc'::text, now()),
-    timezone('utc'::text, now())
+    NOW(),
+    NOW()
   )
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     name = COALESCE(EXCLUDED.name, public.profiles.name),
-    updated_at = timezone('utc'::text, now());
+    updated_at = NOW();
     
   RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Guard against crashing user registration; log warning to database log
+  RAISE WARNING 'handle_new_user trigger non-fatal issue for user %: %', NEW.id, SQLERRM;
+  RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+$$;
 
--- Recreate trigger on auth.users
+-- Recreate clean trigger on auth.users (strictly AFTER INSERT)
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
-  AFTER INSERT OR UPDATE ON auth.users
+  AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ----------------------------------------------------------------------------
@@ -779,19 +806,47 @@ CREATE OR REPLACE FUNCTION public.record_ticket_scan(
   p_gate TEXT,
   p_scanner_user_id UUID DEFAULT NULL
 )
-RETURNS JSONB AS $$
+RETURNS JSONB
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
 DECLARE
   v_ticket RECORD;
   v_result TEXT;
   v_msg TEXT;
 BEGIN
-  -- Locate ticket by ticket_code
+  -- Verify caller is authorized to operate gate scanner
+  IF auth.role() IS DISTINCT FROM 'service_role'
+     AND NOT public.is_admin()
+     AND public.current_user_role() NOT IN ('scanner', 'gate_supervisor', 'organizer') THEN
+    RAISE EXCEPTION 'Unauthorized gate scanner operation';
+  END IF;
+
+  -- Locate and lock ticket row to prevent concurrent duplicate check-in race condition
   SELECT * INTO v_ticket 
   FROM public.tickets 
-  WHERE ticket_code = p_ticket_code FOR UPDATE;
+  WHERE ticket_code = p_ticket_code
+  FOR UPDATE;
 
   IF NOT FOUND THEN
+    INSERT INTO public.check_ins (
+      ticket_id, ticket_code, event_id, staff_name, scanner_user_id, gate, result, message
+    ) VALUES (
+      NULL, p_ticket_code, NULL, p_staff_name, p_scanner_user_id, p_gate, 'invalid', 'Ticket code not found in registry.'
+    );
     RETURN jsonb_build_object('success', false, 'result', 'invalid', 'message', 'Invalid Ticket Code.');
+  END IF;
+
+  -- Organizers may only scan tickets for their own events
+  IF auth.role() IS DISTINCT FROM 'service_role'
+     AND NOT public.is_admin()
+     AND public.current_user_role() = 'organizer'
+     AND NOT EXISTS (
+       SELECT 1 FROM public.events e
+       JOIN public.organizer_profiles o ON e.organizer_id = o.id
+       WHERE e.id = v_ticket.event_id AND o.owner_id = auth.uid()
+     ) THEN
+    RAISE EXCEPTION 'Unauthorized: ticket does not belong to your organization';
   END IF;
 
   -- Check status
@@ -842,7 +897,7 @@ BEGIN
     'tierName', (SELECT name FROM public.ticket_tiers WHERE id = v_ticket.tier_id)
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+$$;
 
 -- ----------------------------------------------------------------------------
 -- 5.3 CASHLESS RFID POS DEDUCTION FUNCTION
@@ -853,7 +908,10 @@ CREATE OR REPLACE FUNCTION public.process_wristband_charge(
   p_vendor_name TEXT,
   p_vendor_user_id UUID DEFAULT NULL
 )
-RETURNS JSONB AS $$
+RETURNS JSONB
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
 DECLARE
   v_wb RECORD;
   v_new_bal BIGINT;
@@ -862,6 +920,7 @@ BEGIN
   IF p_amount_minor IS NULL OR p_amount_minor <= 0 THEN
     RETURN jsonb_build_object('success', false, 'message', 'Charge amount must be positive.');
   END IF;
+
   SELECT * INTO v_wb 
   FROM public.cashless_wristbands 
   WHERE uid = p_uid FOR UPDATE;
@@ -903,12 +962,12 @@ BEGIN
     'reference', v_ref
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+$$;
 
 -- ----------------------------------------------------------------------------
 -- 5.4 DOUBLE-ENTRY LEDGER RECONCILIATION AUDIT VIEW
 -- ----------------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.v_ledger_reconciliation WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW public.v_ledger_reconciliation AS
 SELECT 
   currency,
   SUM(debit_minor) AS total_debits_minor,
@@ -953,16 +1012,51 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 -- Helper Functions for RLS
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.current_user_role()
-RETURNS user_role AS $$
+RETURNS user_role
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE sql AS $$
   SELECT role FROM public.profiles WHERE id = auth.uid();
-$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+$$;
 
 CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE sql AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
   );
-$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+$$;
+
+-- Prevent privilege escalation on self-update of profiles
+CREATE OR REPLACE FUNCTION public.protect_profile_privileged_columns()
+RETURNS TRIGGER
+SECURITY DEFINER
+SET search_path = public, pg_temp
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF auth.uid() IS NOT NULL
+     AND auth.role() IS DISTINCT FROM 'service_role'
+     AND NOT public.is_admin() THEN
+    IF NEW.role IS DISTINCT FROM OLD.role
+       OR NEW.status IS DISTINCT FROM OLD.status
+       OR NEW.risk_score IS DISTINCT FROM OLD.risk_score
+       OR NEW.suspension_reason IS DISTINCT FROM OLD.suspension_reason
+       OR NEW.notes IS DISTINCT FROM OLD.notes THEN
+      RAISE EXCEPTION 'Insufficient privileges to modify restricted profile security columns';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_profile_privileged_columns ON public.profiles;
+CREATE TRIGGER trg_protect_profile_privileged_columns
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.protect_profile_privileged_columns();
 
 -- ----------------------------------------------------------------------------
 -- RLS: PROFILES
@@ -973,18 +1067,53 @@ CREATE POLICY "Profiles readable by owner or admins"
 
 CREATE POLICY "Users can update their own profile"
   ON public.profiles FOR UPDATE
-  USING (auth.uid() = id)
+  USING (auth.uid() = id OR public.is_admin())
+  WITH CHECK (auth.uid() = id OR public.is_admin());
+
+CREATE POLICY "Users can insert their own profile"
+  ON public.profiles FOR INSERT
   WITH CHECK (auth.uid() = id);
 
--- Profile owners may edit contact details, not roles or risk controls.
-REVOKE UPDATE ON public.profiles FROM PUBLIC, anon, authenticated;
-GRANT UPDATE (name, phone, avatar_url, country, city) ON public.profiles TO authenticated;
+CREATE POLICY "Service role full access on profiles"
+  ON public.profiles FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
 
--- These SECURITY DEFINER routines bypass RLS and must only be called by trusted services.
-REVOKE ALL ON FUNCTION public.record_ticket_scan(TEXT, TEXT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.process_wristband_charge(TEXT, BIGINT, TEXT, UUID) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.record_ticket_scan(TEXT, TEXT, TEXT, UUID) TO service_role;
-GRANT EXECUTE ON FUNCTION public.process_wristband_charge(TEXT, BIGINT, TEXT, UUID) TO service_role;
+-- ----------------------------------------------------------------------------
+-- RLS: ORGANIZER PROFILES & TEAM MEMBERS
+-- ----------------------------------------------------------------------------
+CREATE POLICY "Verified organizer profiles readable publicly or by owner/admin"
+  ON public.organizer_profiles FOR SELECT
+  USING (verified = true OR owner_id = auth.uid() OR public.is_admin());
+
+CREATE POLICY "Authenticated users can create their organizer profile"
+  ON public.organizer_profiles FOR INSERT
+  WITH CHECK (auth.uid() = owner_id OR public.is_admin());
+
+CREATE POLICY "Organizer owners or admins can update organizer profiles"
+  ON public.organizer_profiles FOR UPDATE
+  USING (owner_id = auth.uid() OR public.is_admin())
+  WITH CHECK (owner_id = auth.uid() OR public.is_admin());
+
+CREATE POLICY "Team members readable by self, org owner, or admin"
+  ON public.team_members FOR SELECT
+  USING (
+    user_id = auth.uid() OR
+    public.is_admin() OR
+    organization_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  );
+
+CREATE POLICY "Org owners and admins manage team members"
+  ON public.team_members FOR ALL
+  USING (
+    public.is_admin() OR
+    organization_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  )
+  WITH CHECK (
+    public.is_admin() OR
+    organization_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  );
 
 -- ----------------------------------------------------------------------------
 -- RLS: EVENTS
@@ -1082,7 +1211,114 @@ CREATE POLICY "Check-in logs viewable by organizers, staff, and admins"
     )
   );
 
--- Check-in writes require a trusted service until staff authorization is implemented.
+CREATE POLICY "Gate staff can insert check-in records"
+  ON public.check_ins FOR INSERT
+  WITH CHECK (
+    public.is_admin() OR
+    public.current_user_role() IN ('scanner', 'gate_supervisor') OR
+    event_id IN (
+      SELECT e.id FROM public.events e
+      JOIN public.organizer_profiles o ON e.organizer_id = o.id
+      WHERE o.owner_id = auth.uid()
+    )
+  );
+
+-- ----------------------------------------------------------------------------
+-- RLS: PROMO CODES, PAYOUTS, REFUNDS & WAITLIST
+-- ----------------------------------------------------------------------------
+CREATE POLICY "Active promo codes verifiable or managed by owner/admin"
+  ON public.promo_codes FOR SELECT
+  USING (
+    active = true OR
+    public.is_admin() OR
+    organizer_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  );
+
+CREATE POLICY "Organizers and admins manage promo codes"
+  ON public.promo_codes FOR ALL
+  USING (
+    public.is_admin() OR
+    organizer_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  )
+  WITH CHECK (
+    public.is_admin() OR
+    organizer_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  );
+
+CREATE POLICY "Payout requests viewable by owning organizer or admin"
+  ON public.payout_requests FOR SELECT
+  USING (
+    public.is_admin() OR
+    organizer_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  );
+
+CREATE POLICY "Organizers can submit payout requests"
+  ON public.payout_requests FOR INSERT
+  WITH CHECK (
+    public.is_admin() OR
+    organizer_id IN (SELECT id FROM public.organizer_profiles WHERE owner_id = auth.uid())
+  );
+
+CREATE POLICY "Only admins can approve or update payout status"
+  ON public.payout_requests FOR UPDATE
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
+CREATE POLICY "Refund requests readable by attendee, organizer, or admin"
+  ON public.refund_requests FOR SELECT
+  USING (
+    public.is_admin() OR
+    EXISTS (SELECT 1 FROM public.tickets t WHERE t.id = ticket_id AND t.attendee_id = auth.uid()) OR
+    event_id IN (
+      SELECT e.id FROM public.events e
+      JOIN public.organizer_profiles o ON e.organizer_id = o.id
+      WHERE o.owner_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Attendees can submit refund requests for their tickets"
+  ON public.refund_requests FOR INSERT
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM public.tickets t WHERE t.id = ticket_id AND t.attendee_id = auth.uid())
+  );
+
+CREATE POLICY "Organizers and admins can review refund requests"
+  ON public.refund_requests FOR UPDATE
+  USING (
+    public.is_admin() OR
+    event_id IN (
+      SELECT e.id FROM public.events e
+      JOIN public.organizer_profiles o ON e.organizer_id = o.id
+      WHERE o.owner_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Waitlist viewable by member, organizer, or admin"
+  ON public.waitlist_entries FOR SELECT
+  USING (
+    auth.uid() = user_id OR
+    public.is_admin() OR
+    event_id IN (
+      SELECT e.id FROM public.events e
+      JOIN public.organizer_profiles o ON e.organizer_id = o.id
+      WHERE o.owner_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Waitlist entries creatable by authenticated or guest users"
+  ON public.waitlist_entries FOR INSERT
+  WITH CHECK (user_id IS NULL OR auth.uid() = user_id);
+
+CREATE POLICY "Organizers and admins manage waitlist state"
+  ON public.waitlist_entries FOR UPDATE
+  USING (
+    public.is_admin() OR
+    event_id IN (
+      SELECT e.id FROM public.events e
+      JOIN public.organizer_profiles o ON e.organizer_id = o.id
+      WHERE o.owner_id = auth.uid()
+    )
+  );
 
 -- ----------------------------------------------------------------------------
 -- RLS: GENERAL LEDGER
@@ -1119,19 +1355,41 @@ CREATE POLICY "Wristband transactions viewable by owner or admin"
   );
 
 -- ----------------------------------------------------------------------------
--- RLS: LAUNCH GATES & ANNOUNCEMENTS
+-- RLS: LAUNCH GATES, ANNOUNCEMENTS, WEBHOOKS & AUDIT LOGS
 -- ----------------------------------------------------------------------------
 CREATE POLICY "Launch gates readable by all"
   ON public.country_launch_gates FOR SELECT
   USING (true);
 
+CREATE POLICY "Only admins can update launch gates"
+  ON public.country_launch_gates FOR UPDATE
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
 CREATE POLICY "Announcements readable by all"
   ON public.platform_announcements FOR SELECT
   USING (active = true OR public.is_admin());
 
+CREATE POLICY "Only admins manage announcements"
+  ON public.platform_announcements FOR ALL
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
 CREATE POLICY "Community pulse readable by all"
   ON public.community_highlights FOR SELECT
   USING (true);
+
+CREATE POLICY "Only admins can read webhook logs"
+  ON public.webhook_logs FOR SELECT
+  USING (public.is_admin());
+
+CREATE POLICY "Only admins can read audit logs"
+  ON public.audit_logs FOR SELECT
+  USING (public.is_admin());
+
+CREATE POLICY "Admins can write audit logs"
+  ON public.audit_logs FOR INSERT
+  WITH CHECK (public.is_admin());
 
 -- ============================================================================
 -- 7. INITIAL PAN-AFRICAN LAUNCH GATES SEEDING

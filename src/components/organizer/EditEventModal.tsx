@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Event, TicketTier, EventCategory, EventFormat } from '../../types';
 import { store } from '../../lib/store';
+import { generateUniqueId } from '../../lib/security';
 
 interface EditEventModalProps {
   event: Event;
@@ -27,39 +28,36 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({
   onClose,
   onSave,
 }) => {
-  if (!isOpen) return null;
-
-  const [title, setTitle] = useState(event.title);
+  const [title, setTitle] = useState(event.title || '');
   const [shortSummary, setShortSummary] = useState(event.shortSummary || '');
-  const [description, setDescription] = useState(event.description);
+  const [description, setDescription] = useState(event.description || '');
   const [category, setCategory] = useState<EventCategory>(event.category);
   const [format, setFormat] = useState<EventFormat>(event.format);
-  const [status, setStatus] = useState<'published' | 'draft' | 'cancelled' | 'ended'>(event.status);
+  const [status, setStatus] = useState<Event['status']>(event.status);
 
-  // Venue & Location
-  const [venueName, setVenueName] = useState(event.venue.name);
-  const [venueAddress, setVenueAddress] = useState(event.venue.address);
-  const [venueCity, setVenueCity] = useState(event.venue.city);
-  const [venueCountry, setVenueCountry] = useState(event.venue.country);
+  const [venueName, setVenueName] = useState(event.venue?.name || '');
+  const [venueAddress, setVenueAddress] = useState(event.venue?.address || '');
+  const [venueCity, setVenueCity] = useState(event.venue?.city || '');
+  const [venueCountry, setVenueCountry] = useState(event.venue?.country || '');
   const [virtualUrl, setVirtualUrl] = useState(event.virtualUrl || '');
 
-  // Schedule
-  const [startDate, setStartDate] = useState(
+  const [startDate, setStartDate] = useState(() =>
     event.startDate ? new Date(event.startDate).toISOString().slice(0, 16) : ''
   );
-  const [endDate, setEndDate] = useState(
+  const [endDate, setEndDate] = useState(() =>
     event.endDate ? new Date(event.endDate).toISOString().slice(0, 16) : ''
   );
-  const [timezone, setTimezone] = useState(event.timezone || 'Africa/Johannesburg (GMT+2)');
-
-  // Policies
-  const [refundPolicy, setRefundPolicy] = useState(event.refundPolicy);
-  const [ageRestriction, setAgeRestriction] = useState(event.ageRestriction || 'All Ages');
+  const [timezone, setTimezone] = useState(event.timezone || 'Africa/Johannesburg');
+  const [refundPolicy, setRefundPolicy] = useState(event.refundPolicy || '');
+  const [ageRestriction, setAgeRestriction] = useState(event.ageRestriction || '');
 
   // Ticket Tiers
   const [tickets, setTickets] = useState<TicketTier[]>(
     event.tickets.map(t => ({ ...t }))
   );
+  const [tierWarning, setTierWarning] = useState<string | null>(null);
+
+  if (!isOpen) return null;
 
   const handleUpdateTier = (index: number, updates: Partial<TicketTier>) => {
     setTickets(prev => {
@@ -70,8 +68,9 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({
   };
 
   const handleAddTier = () => {
+    setTierWarning(null);
     const newTier: TicketTier = {
-      id: `tier-${Date.now()}`,
+      id: generateUniqueId('tier'),
       eventId: event.id,
       name: 'General Admission',
       description: 'Standard admission pass',
@@ -90,9 +89,10 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({
 
   const handleRemoveTier = (index: number) => {
     if (tickets.length <= 1) {
-      alert('Event must have at least one ticket tier.');
+      setTierWarning('An event must retain at least one active ticket tier.');
       return;
     }
+    setTierWarning(null);
     setTickets(prev => prev.filter((_, i) => i !== index));
   };
 
@@ -402,6 +402,12 @@ export const EditEventModal: React.FC<EditEventModalProps> = ({
                   </div>
                 </div>
               ))}
+              {tierWarning && (
+                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{tierWarning}</span>
+                </div>
+              )}
             </div>
           </div>
 

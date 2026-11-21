@@ -128,6 +128,7 @@ export interface Ticket {
   id: string;
   ticketCode: string; // e.g. NX-TKT-84920
   token: string; // cryptographic validation token
+  securityHash?: string; // HMAC fingerprint rotated on transfer
   orderId: string;
   eventId: string;
   eventTitle: string;
@@ -283,6 +284,7 @@ export interface OrganizerProfile {
   logoUrl?: string;
   bannerUrl?: string;
   taxNumber?: string;
+  registrationNumber?: string;
   socialLinks?: {
     instagram?: string;
     twitter?: string;
@@ -395,7 +397,7 @@ export interface PriorityTask {
 
 export interface ActivityFeedItem {
   id: string;
-  type: 'purchase' | 'checkin' | 'refund' | 'campaign' | 'rfp' | 'session' | 'integration' | 'profile' | 'webhook';
+  type: 'purchase' | 'checkin' | 'refund' | 'campaign' | 'rfp' | 'session' | 'integration' | 'profile' | 'webhook' | 'transfer';
   title: string;
   description: string;
   timestamp: string;

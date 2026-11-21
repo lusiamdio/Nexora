@@ -13,6 +13,8 @@ import { SuperAdminPlatform } from './components/admin/SuperAdminPlatform';
 import { CommunityPulse } from './components/marketplace/CommunityPulse';
 import { LegalPage } from './components/navigation/LegalPage';
 import { store } from './lib/store';
+import { supabase, isSupabaseConfigured, supabaseSignOut } from './lib/supabase';
+import { sanitizeText, clearAdminSessionToken } from './lib/security';
 import { Event, Ticket, AuthUser } from './types';
 import { 
   ShieldCheck, 
@@ -191,21 +193,46 @@ export default function App() {
     }
   }, [events]);
 
-  // Strict Role Route Guards:
-  // - Buyer can only see tickets and Marketplace
-  // - Organizer can see tickets and Organizer portal
-  // - Admin must be connected to the Super Admin
+  // Role Route Guards & Live Supabase Auth State Synchronization:
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        store.logout();
+        clearAdminSessionToken();
+        setCurrentUser(null);
+      } else if (session?.user) {
+        const rawRole = session.user.user_metadata?.role;
+        const safeRole: AuthUser['role'] =
+          rawRole === 'organizer' || rawRole === 'admin' || rawRole === 'scanner'
+            ? rawRole
+            : 'attendee';
+        const syncedUser: AuthUser = {
+          id: session.user.id,
+          name: sanitizeText(session.user.user_metadata?.full_name, 100) || (session.user.email || 'Member').split('@')[0],
+          email: session.user.email || '',
+          role: safeRole,
+          provider: 'supabase',
+          organizationId: safeRole === 'organizer' ? 'org-' + session.user.id.slice(0, 8) : undefined,
+        };
+        store.setCurrentUser(syncedUser);
+        setCurrentUser(syncedUser);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   useEffect(() => {
     if (currentUser?.role === 'attendee') {
-      if (activeView === 'organizer' || activeView === 'admin' || activeView === 'scanner') {
+      if (activeView === 'organizer') {
         setActiveView('marketplace');
       }
-    } else if (currentUser?.role === 'organizer') {
-      if (activeView === 'admin' || activeView === 'scanner') {
-        setActiveView('organizer');
-      }
     } else if (!currentUser) {
-      if (activeView === 'admin' || activeView === 'organizer' || activeView === 'scanner') {
+      if (activeView === 'organizer') {
         setActiveView('marketplace');
       }
     }
@@ -267,11 +294,11 @@ export default function App() {
     { label: 'Online', value: 'online' },
   ];
 
-  // Dynamic Schema.org JSON-LD for SEO
+  // Dynamic Schema.org JSON-LD for SEO (XSS-safe textContent injection)
   useEffect(() => {
     const script = document.createElement('script');
     script.type = 'application/ld+json';
-    script.innerHTML = JSON.stringify({
+    script.textContent = JSON.stringify({
       '@context': 'https://schema.org',
       '@type': 'ItemList',
       itemListElement: events.map((e, idx) => ({
@@ -307,7 +334,7 @@ export default function App() {
           },
         },
       })),
-    });
+    }).replace(/</g, '\\u003c');
     document.head.appendChild(script);
     return () => {
       document.head.removeChild(script);
@@ -338,6 +365,8 @@ export default function App() {
           }}
           currentUser={currentUser}
           onLogout={() => {
+            void supabaseSignOut();
+            clearAdminSessionToken();
             store.logout();
             setCurrentUser(null);
           }}
@@ -354,6 +383,7 @@ export default function App() {
         {/* VIEW 1: ORGANIZER PORTAL */}
         {activeView === 'organizer' && (
           <OrganizerPortal
+            currentUser={currentUser}
             onBackToMarketplace={() => setActiveView('marketplace')}
             onEventCreated={(newEvt) => {
               refreshData();
@@ -1744,6 +1774,7 @@ export default function App() {
           <CheckoutPage
             event={checkoutEvent}
             selectedItems={checkoutItems}
+            currentUser={currentUser}
             onBack={() => {
               setActiveView('event');
               window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1763,6 +1794,7 @@ export default function App() {
         {activeView === 'wallet' && (
           <TicketWalletPage
             tickets={tickets}
+            currentUser={currentUser}
             onBack={() => {
               setActiveView('marketplace');
               window.scrollTo({ top: 0, behavior: 'smooth' });

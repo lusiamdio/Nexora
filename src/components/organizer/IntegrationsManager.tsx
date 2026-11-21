@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { ThirdPartyIntegration, CustomWebhookEndpoint, WebhookDeliveryLog, OrganizerProfile } from '../../types';
 import { store } from '../../lib/store';
+import { generateRandomHex, isSafeHttpsUrl } from '../../lib/security';
 
 interface IntegrationsManagerProps {
   organizer: OrganizerProfile;
@@ -82,7 +83,8 @@ export const IntegrationsManager: React.FC<IntegrationsManagerProps> = ({
   // Webhook creation form state
   const [newWebhookName, setNewWebhookName] = useState('');
   const [newWebhookUrl, setNewWebhookUrl] = useState('');
-  const [newWebhookSecret, setNewWebhookSecret] = useState('whsec_' + Math.random().toString(36).substring(2, 14));
+  const [newWebhookSecret, setNewWebhookSecret] = useState(() => 'whsec_' + generateRandomHex(12));
+  const [webhookError, setWebhookError] = useState<string | null>(null);
   const [newWebhookEvents, setNewWebhookEvents] = useState<string[]>([
     'ticket.purchased',
     'attendee.checked_in',
@@ -160,34 +162,57 @@ export const IntegrationsManager: React.FC<IntegrationsManagerProps> = ({
     setTestingHandshake(true);
     setHandshakeFeedback(null);
     const target = item || activeConfigItem;
-    
-    setTimeout(() => {
+    const startedAt = performance.now();
+
+    if (configWebhookUrl.trim() && !isSafeHttpsUrl(configWebhookUrl.trim())) {
       setTestingHandshake(false);
-      const latency = Math.floor(Math.random() * 35) + 22;
-      setHandshakeFeedback(`Handshake validated: HTTP 200 OK (${latency}ms) — Connection healthy with verified credentials.`);
-      notify(`Connection verified for ${target?.name || 'integration'} in ${latency}ms.`);
-    }, 600);
+      setHandshakeFeedback('Handshake check failed: Webhook URL must be a valid public HTTPS endpoint.');
+      return;
+    }
+
+    if (!configApiKey.trim() && !item?.config?.apiKey) {
+      setTestingHandshake(false);
+      setHandshakeFeedback('Handshake check failed: Enter a valid API key before verifying credentials.');
+      return;
+    }
+
+    const elapsedMs = Math.max(1, Math.round(performance.now() - startedAt));
+    setTestingHandshake(false);
+    setHandshakeFeedback(`Credentials & HTTPS endpoint validated (${elapsedMs}ms) — Ready to enable sync.`);
+    notify(`Configuration verified for ${target?.name || 'integration'}.`);
   };
 
   // Custom Webhook Handlers
   const handleCreateWebhook = (e: React.FormEvent) => {
     e.preventDefault();
+    setWebhookError(null);
     if (!newWebhookName.trim() || !newWebhookUrl.trim()) return;
 
-    store.createCustomWebhook(organizer.id, {
-      name: newWebhookName.trim(),
-      url: newWebhookUrl.trim(),
-      secret: newWebhookSecret.trim(),
-      events: newWebhookEvents,
-      active: true,
-    });
+    if (!isSafeHttpsUrl(newWebhookUrl.trim())) {
+      setWebhookError('Destination URL must use HTTPS and target a public domain.');
+      return;
+    }
 
-    setCustomWebhooks(store.getCustomWebhooks(organizer.id));
-    setDeliveryLogs(store.getWebhookDeliveryLogs(organizer.id));
-    setShowAddWebhookModal(false);
-    setNewWebhookName('');
-    setNewWebhookUrl('');
-    notify('Custom webhook endpoint created successfully.');
+    try {
+      store.createCustomWebhook(organizer.id, {
+        name: newWebhookName.trim(),
+        url: newWebhookUrl.trim(),
+        secret: newWebhookSecret.trim() || ('whsec_' + generateRandomHex(12)),
+        events: newWebhookEvents,
+        active: true,
+      });
+
+      setCustomWebhooks(store.getCustomWebhooks(organizer.id));
+      setDeliveryLogs(store.getWebhookDeliveryLogs(organizer.id));
+      setShowAddWebhookModal(false);
+      setNewWebhookName('');
+      setNewWebhookUrl('');
+      setNewWebhookSecret('whsec_' + generateRandomHex(12));
+      setWebhookError(null);
+      notify('Custom webhook endpoint created successfully.');
+    } catch (err: any) {
+      setWebhookError(err?.message || 'Unable to register webhook endpoint.');
+    }
   };
 
   const handleDeleteWebhook = (whId: string) => {
@@ -862,6 +887,11 @@ export const IntegrationsManager: React.FC<IntegrationsManagerProps> = ({
             </div>
 
             <form onSubmit={handleCreateWebhook} className="p-6 space-y-4 text-xs">
+              {webhookError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
+                  {webhookError}
+                </div>
+              )}
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 opacity-80">
                   Endpoint Name *

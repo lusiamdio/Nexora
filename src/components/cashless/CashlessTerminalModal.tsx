@@ -21,6 +21,7 @@ import confetti from 'canvas-confetti';
 import { CashlessWristband, Event } from '../../types';
 import { store } from '../../lib/store';
 import { formatCurrency } from '../../lib/currencies';
+import { generateRandomHex, isValidEmail, sanitizeText } from '../../lib/security';
 
 interface CashlessTerminalModalProps {
   isOpen: boolean;
@@ -48,26 +49,28 @@ const MENU_ITEMS = [
 export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
   isOpen,
   onClose,
-  attendeeEmail = 'nomvula.dlamini@example.com',
-  attendeeName = 'Nomvula Dlamini',
+  attendeeEmail = '',
+  attendeeName = '',
   theme = 'dark'
 }) => {
   const isDark = theme === 'dark';
 
+  const currentUser = store.getCurrentUser();
+  const resolvedEmail = (attendeeEmail || currentUser?.email || '').trim();
+  const resolvedName = (attendeeName || currentUser?.name || '').trim();
+  const availableEvents = store.getEvents();
+
   const [mode, setMode] = useState<'attendee_wallet' | 'vendor_pos'>('attendee_wallet');
-  const [wristband, setWristband] = useState<CashlessWristband>(() => {
-    const existing = store.getWristbandForAttendee(attendeeEmail);
-    if (existing) return existing;
-    return store.pairWristband({
-      uid: 'NFC-4A:9B:C2:11',
-      attendeeEmail,
-      attendeeName,
-      eventId: 'evt-cape-town-vibes-2026',
-      eventTitle: 'Cape Town Vibes Festival 2026',
-      initialBalanceMinor: 75000,
-      currency: 'ZAR'
-    });
+  const [wristband, setWristband] = useState<CashlessWristband | null>(() => {
+    if (!resolvedEmail) return null;
+    return store.getWristbandForAttendee(resolvedEmail) || null;
   });
+
+  // Explicit Wristband Pairing Form State
+  const [pairName, setPairName] = useState(resolvedName);
+  const [pairEmail, setPairEmail] = useState(resolvedEmail);
+  const [pairEventId, setPairEventId] = useState(availableEvents[0]?.id || '');
+  const [pairUid, setPairUid] = useState('');
 
   // Attendee Top Up State
   const [topUpAmount, setTopUpAmount] = useState<number>(25000); // R250.00
@@ -82,7 +85,33 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
 
   if (!isOpen) return null;
 
+  const handlePairWristband = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanedName = sanitizeText(pairName, 120);
+    const cleanedEmail = pairEmail.trim();
+    if (!cleanedName || !isValidEmail(cleanedEmail)) {
+      setFeedback('Enter a valid passholder name and email address to pair a wristband.');
+      return;
+    }
+    const evt = availableEvents.find(ev => ev.id === pairEventId) || availableEvents[0];
+    const generatedUid =
+      sanitizeText(pairUid, 40).toUpperCase() ||
+      `NFC-${generateRandomHex(1).toUpperCase()}:${generateRandomHex(1).toUpperCase()}:C2:${generateRandomHex(1).toUpperCase()}`;
+    const paired = store.pairWristband({
+      uid: generatedUid,
+      attendeeEmail: cleanedEmail,
+      attendeeName: cleanedName,
+      eventId: evt?.id || 'general',
+      eventTitle: evt?.title || 'Nexora Event Pass',
+      initialBalanceMinor: 0,
+      currency: evt?.currency || 'ZAR',
+    });
+    setWristband(paired);
+    setFeedback(`Wristband ${paired.uid} paired with 0.00 starting balance.`);
+  };
+
   const handleTopUp = () => {
+    if (!wristband) return;
     setIsProcessing(true);
     setFeedback(null);
 
@@ -119,7 +148,7 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
   }, 0);
 
   const handleSimulateNfcTap = () => {
-    if (cartTotalMinor === 0) return;
+    if (!wristband || cartTotalMinor === 0) return;
     setIsProcessing(true);
     setTapSuccess(null);
     setFeedback(null);
@@ -207,7 +236,86 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
 
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          
+          {!wristband ? (
+            <form onSubmit={handlePairWristband} className={`p-6 rounded-2xl border space-y-4 ${
+              isDark ? 'bg-black/40 border-white/10' : 'bg-neutral-50 border-black/10'
+            }`}>
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-emerald-400" />
+                  <span>Pair a Real-Time NFC Wristband</span>
+                </h4>
+                <p className="text-xs font-mono opacity-60">
+                  No pre-seeded wristband found for this account. Link an NFC pass below (initial balance starts at 0.00).
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block font-mono font-bold mb-1 opacity-70">Passholder Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={pairName}
+                    onChange={e => setPairName(e.target.value)}
+                    placeholder="Full Name"
+                    className={`w-full px-3 py-2 rounded-lg border focus:outline-none ${
+                      isDark ? 'bg-black border-white/15 text-white' : 'bg-white border-black/15 text-black'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="block font-mono font-bold mb-1 opacity-70">Attendee Email *</label>
+                  <input
+                    type="email"
+                    required
+                    value={pairEmail}
+                    onChange={e => setPairEmail(e.target.value)}
+                    placeholder="email@domain.com"
+                    className={`w-full px-3 py-2 rounded-lg border focus:outline-none ${
+                      isDark ? 'bg-black border-white/15 text-white' : 'bg-white border-black/15 text-black'
+                    }`}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block font-mono font-bold mb-1 opacity-70">Linked Event</label>
+                  <select
+                    value={pairEventId}
+                    onChange={e => setPairEventId(e.target.value)}
+                    className={`w-full px-3 py-2 rounded-lg border focus:outline-none ${
+                      isDark ? 'bg-black border-white/15 text-white' : 'bg-white border-black/15 text-black'
+                    }`}
+                  >
+                    {availableEvents.map(ev => (
+                      <option key={ev.id} value={ev.id}>{ev.title}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-mono font-bold mb-1 opacity-70">Hardware UID (Optional)</label>
+                  <input
+                    type="text"
+                    value={pairUid}
+                    onChange={e => setPairUid(e.target.value)}
+                    placeholder="Auto-generate if empty"
+                    className={`w-full px-3 py-2 rounded-lg border font-mono focus:outline-none ${
+                      isDark ? 'bg-black border-white/15 text-white' : 'bg-white border-black/15 text-black'
+                    }`}
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                className={`w-full py-3 rounded-xl text-xs font-bold font-mono uppercase tracking-wider cursor-pointer ${
+                  isDark ? 'bg-white text-black hover:bg-neutral-200' : 'bg-black text-white hover:bg-neutral-800'
+                }`}
+              >
+                Pair NFC Wristband (0.00 Balance)
+              </button>
+            </form>
+          ) : (
+            <>
           {/* Virtual Wristband Card Graphic */}
           <div className="p-6 rounded-2xl bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-950 text-white border border-white/15 relative overflow-hidden shadow-xl">
             <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -462,6 +570,8 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
               </div>
 
             </div>
+          )}
+            </>
           )}
 
         </div>

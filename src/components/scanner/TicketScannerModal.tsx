@@ -31,12 +31,10 @@ export const TicketScannerModal: React.FC<TicketScannerModalProps> = ({
   onClose,
   events,
 }) => {
-  if (!isOpen) return null;
-
   const [selectedEventId, setSelectedEventId] = useState<string>(events[0]?.id || '');
   const [manualCode, setManualCode] = useState('');
   const [gateName, setGateName] = useState('Gate 1 — Main Entrance');
-  const [staffName, setStaffName] = useState('Kwame Mensah');
+  const [staffName, setStaffName] = useState(store.getCurrentUser()?.name || 'Gate Officer');
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Offline Mode Engine (PRD Journey C)
@@ -56,6 +54,8 @@ export const TicketScannerModal: React.FC<TicketScannerModalProps> = ({
     const cached = store.cacheEventTicketsForOffline(selectedEventId);
     setOfflineCachedCount(cached.length);
   }, [selectedEventId]);
+
+  if (!isOpen) return null;
 
   // Audio synthesizer via Web Audio API
   const playSound = (type: 'success' | 'warning' | 'error') => {
@@ -406,44 +406,40 @@ export const TicketScannerModal: React.FC<TicketScannerModalProps> = ({
               </div>
             </div>
 
-            {/* Test Scenarios */}
-            <div className="p-3.5 bg-[#F8F7F4] rounded-xl border border-[#E5E7EB] space-y-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B7280] block">
-                Instant Verification Scenarios (Click to test acceptance criteria)
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {sampleValidTicket && (
-                  <button
-                    onClick={() => handleValidate(sampleValidTicket.ticketCode)}
-                    className="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Valid Pass ({sampleValidTicket.ticketCode})
-                  </button>
-                )}
-                {sampleCheckedInTicket && (
-                  <button
-                    onClick={() => handleValidate(sampleCheckedInTicket.ticketCode)}
-                    className="px-3 py-1.5 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Duplicate / Passback ({sampleCheckedInTicket.ticketCode})
-                  </button>
-                )}
-                {sampleRefundedTicket && (
-                  <button
-                    onClick={() => handleValidate(sampleRefundedTicket.ticketCode)}
-                    className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-800 border border-red-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Refunded Pass ({sampleRefundedTicket.ticketCode})
-                  </button>
-                )}
-                <button
-                  onClick={() => handleValidate('FAKE-CODE-99999')}
-                  className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-800 border border-red-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                >
-                  Fraud / Invalid Token
-                </button>
+            {/* Active Ticket Verification Shortcuts */}
+            {(sampleValidTicket || sampleCheckedInTicket || sampleRefundedTicket) && (
+              <div className="p-3.5 bg-[#F8F7F4] rounded-xl border border-[#E5E7EB] space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#6B7280] block">
+                  Issued Pass Quick Lookup
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {sampleValidTicket && (
+                    <button
+                      onClick={() => handleValidate(sampleValidTicket.ticketCode)}
+                      className="px-3 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Valid Pass ({sampleValidTicket.ticketCode})
+                    </button>
+                  )}
+                  {sampleCheckedInTicket && (
+                    <button
+                      onClick={() => handleValidate(sampleCheckedInTicket.ticketCode)}
+                      className="px-3 py-1.5 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Duplicate / Passback ({sampleCheckedInTicket.ticketCode})
+                    </button>
+                  )}
+                  {sampleRefundedTicket && (
+                    <button
+                      onClick={() => handleValidate(sampleRefundedTicket.ticketCode)}
+                      className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-800 border border-red-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Refunded Pass ({sampleRefundedTicket.ticketCode})
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
           </div>
 

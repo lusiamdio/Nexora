@@ -69,7 +69,20 @@ import { OrganizerProfile, Event, CountryLaunchGate, WebhookLog, LedgerEntry, Au
 import { IntegrationArchitectureView } from './IntegrationArchitectureView';
 import { WaitlistReclamationDrawer } from './WaitlistReclamationDrawer';
 import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
-import { checkSupabaseHealth, rotateSupabaseKeys, fetchLaunchGatesFromSupabase, updateLaunchGateInSupabase } from '../../lib/supabase';
+import {
+  checkSupabaseHealth,
+  rotateSupabaseKeys,
+  fetchLaunchGatesFromSupabase,
+  updateLaunchGateInSupabase,
+  fetchProfilesFromSupabase,
+  supabaseGetAccessToken,
+} from '../../lib/supabase';
+import {
+  getAdminSessionToken,
+  setAdminSessionToken,
+  clearAdminSessionToken,
+  isSafeHttpsUrl,
+} from '../../lib/security';
 
 
 interface SuperAdminPlatformProps {
@@ -125,7 +138,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
   // Live platform state from authoritative store
   const [organizers, setOrganizers] = useState<OrganizerProfile[]>(store.getOrganizers());
-  const [events, setEvents] = useState<Event[]>(store.getEvents());
+  const [events, setEvents] = useState<Event[]>(store.getPlatformEvents());
   const [launchGates, setLaunchGates] = useState<CountryLaunchGate[]>(store.getLaunchGates());
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>(store.getWebhookLogs());
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>(store.getLedgerEntries());
@@ -136,7 +149,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   const [selectedOrganizerId, setSelectedOrganizerId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedLedgerId, setSelectedLedgerId] = useState<string | null>(null);
-  const [selectedGateId, setSelectedGateId] = useState<string | null>('gate-main-johannesburg');
+  const [selectedGateId, setSelectedGateId] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showWaitlistDrawer, setShowWaitlistDrawer] = useState(false);
@@ -168,7 +181,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   const [editingNotesUserId, setEditingNotesUserId] = useState<string | null>(null);
   const [notesInput, setNotesInput] = useState('');
 
-  // AI Features State (Gemini 3.8 Flash)
+  // AI Features State (Gemini 4)
   const [aiRiskLoading, setAiRiskLoading] = useState(false);
   const [aiRiskReports, setAiRiskReports] = useState<Record<string, any>>({});
   const [aiExecutiveBriefLoading, setAiExecutiveBriefLoading] = useState(false);
@@ -209,13 +222,13 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     lastRotatedAt: string;
     schemaDeployed: boolean;
   }>({
-    connected: true,
-    authStatus: 'online (GoTrue v2.197.0)',
-    restStatus: 'authenticated (schema pending execution in Supabase SQL editor)',
+    connected: false,
+    authStatus: 'awaiting verification',
+    restStatus: 'awaiting verification',
     projectId: 'kunabampibfcmnbyjads',
     url: 'https://kunabampibfcmnbyjads.supabase.co',
-    keyFingerprint: 'eyJhbG...Fpn4',
-    latencyMs: 386,
+    keyFingerprint: 'unverified',
+    latencyMs: 0,
     lastRotatedAt: new Date().toISOString(),
     schemaDeployed: false,
   });
@@ -227,6 +240,16 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   const [keyRotateError, setKeyRotateError] = useState<string | null>(null);
   const [keyRotateSuccess, setKeyRotateSuccess] = useState<string | null>(null);
   const [copiedSchema, setCopiedSchema] = useState(false);
+  const [copiedAuthFix, setCopiedAuthFix] = useState(false);
+
+  // Super Admin Passkey Gate State (verified against server HMAC session token)
+  const [bootstrapMode, setBootstrapMode] = useState<'loading' | 'env_configured' | 'claimed' | 'needs_bootstrap'>('loading');
+  const [passkeyInput, setPasskeyInput] = useState('');
+  const [confirmPasskeyInput, setConfirmPasskeyInput] = useState('');
+  const [showPasskeyText, setShowPasskeyText] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [passkeyVerifying, setPasskeyVerifying] = useState(false);
+  const [isPasskeyAuthorized, setIsPasskeyAuthorized] = useState<boolean>(false);
 
   // System time ticker
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -235,8 +258,71 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Sync launch gates from Supabase on platform mount
+  // Verify existing server-signed Admin Token or exchange verified Supabase Admin JWT
   useEffect(() => {
+    let active = true;
+    const verifyExistingSession = async () => {
+      const token = getAdminSessionToken();
+      if (token) {
+        try {
+          const res = await fetch('/api/admin/session', {
+            headers: { 'X-Admin-Token': token },
+          });
+          if (res.ok && active) {
+            setIsPasskeyAuthorized(true);
+            return;
+          }
+        } catch {
+          // fall through
+        }
+        clearAdminSessionToken();
+      }
+
+      // Check first-run passkey bootstrap status
+      try {
+        const statusRes = await fetch('/api/admin/bootstrap-status');
+        if (statusRes.ok && active) {
+          const statusData = await statusRes.json();
+          if (statusData?.mode === 'env_configured' || statusData?.mode === 'claimed' || statusData?.mode === 'needs_bootstrap') {
+            setBootstrapMode(statusData.mode);
+          } else {
+            setBootstrapMode('env_configured');
+          }
+        }
+      } catch {
+        if (active) setBootstrapMode('env_configured');
+      }
+
+      // If signed into Supabase as admin, automatically exchange JWT for short-lived admin token
+      const jwt = await supabaseGetAccessToken();
+      if (jwt) {
+        try {
+          const res = await fetch('/api/admin/session', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${jwt}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.token && active) {
+              setAdminSessionToken(data.token);
+              setIsPasskeyAuthorized(true);
+            }
+          }
+        } catch {
+          // User must authenticate with passkey
+        }
+      }
+    };
+    verifyExistingSession();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Sync launch gates, profiles & Supabase status only after Admin authorization
+  useEffect(() => {
+    if (!isPasskeyAuthorized) return;
+
     fetchLaunchGatesFromSupabase().then(gates => {
       if (gates && gates.length > 0) {
         const mapped: CountryLaunchGate[] = gates.map((g: any) => ({
@@ -262,16 +348,43 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
       }
     });
 
-    // Auto-ping Supabase status
-    fetch('/api/supabase/status')
-      .then(res => res.json())
-      .then(data => {
-        if (data.connected) {
-          setSupabaseStatus(data);
-        }
+    fetchProfilesFromSupabase().then(profiles => {
+      if (profiles && profiles.length > 0) {
+        const mappedUsers: AuthUser[] = profiles.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          email: p.email,
+          role: p.role,
+          avatar: p.avatar_url,
+          country: p.country,
+          city: p.city,
+          phone: p.phone,
+          status: p.status,
+          twoFactorEnabled: p.two_factor_enabled,
+          riskScore: p.risk_score,
+          registeredAt: p.created_at,
+          lastLoginAt: p.last_login_at,
+          notes: p.notes,
+          provider: 'supabase',
+        }));
+        setUsers(mappedUsers);
+      }
+    });
+
+    const token = getAdminSessionToken();
+    if (token) {
+      fetch('/api/supabase/status', {
+        headers: { 'X-Admin-Token': token },
       })
-      .catch(() => {});
-  }, []);
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => {
+          if (data?.connected) {
+            setSupabaseStatus(data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isPasskeyAuthorized]);
 
   const showNotification = (type: 'success' | 'error' | 'info' | 'warning', title: string, message: string) => {
     const notif: AdminNotification = {
@@ -290,10 +403,33 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   // Compute Platform Totals & Metrics (Pure zero-baseline from authentic transactions)
   const allOrders = store.getOrders();
   const allTickets = store.getTickets();
+  const allCheckInLogs = store.getCheckInLogs();
+  const pendingPayouts = store.getPayouts().filter(p => p.status === 'pending');
   const totalGMVMinor = allOrders.reduce((acc, o) => acc + o.totalMinor, 0);
   const platformCommissionMinor = Math.round(totalGMVMinor * 0.05);
   const escrowLiabilityMinor = Math.round(totalGMVMinor * 0.88);
   const clearedPayoutsMinor = Math.round(totalGMVMinor * 0.07);
+  const activeGateNodes = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; event: string; city: string; scans: number; rejected: number }>();
+    allCheckInLogs.forEach(log => {
+      const evt = events.find(e => e.id === log.eventId);
+      const key = `${log.eventId}::${log.gate}`;
+      const existing = map.get(key) || {
+        id: key,
+        name: log.gate,
+        event: evt?.title || log.eventId,
+        city: evt?.venue?.city || 'Venue Gate',
+        scans: 0,
+        rejected: 0,
+      };
+      existing.scans += 1;
+      if (log.result === 'already_checked_in' || log.result === 'invalid' || log.result === 'refunded' || log.result === 'wrong_event') {
+        existing.rejected += 1;
+      }
+      map.set(key, existing);
+    });
+    return Array.from(map.values());
+  }, [allCheckInLogs, events]);
 
   // Active Organizer, Event, Ledger & User pointers for dossier webpages
   const activeOrganizer = organizers.find(o => o.id === selectedOrganizerId) || organizers[0];
@@ -345,10 +481,14 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     try {
       const userOrders = store.getUserOrders(user.id);
       const userTickets = store.getUserTickets(user.id);
+      const adminToken = getAdminSessionToken() || '';
 
       const resp = await fetch('/api/ai/user-risk', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': adminToken,
+        },
         body: JSON.stringify({
           user,
           transactions: userOrders,
@@ -356,32 +496,29 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
         }),
       });
 
+      if (resp.status === 401) {
+        handleLockPlatform();
+        return;
+      }
+
       if (resp.ok) {
         const data = await resp.json();
         setAiRiskReports(prev => ({ ...prev, [user.id]: data }));
         showNotification('success', 'AI Fraud Intelligence Scan', `Evaluated risk score: ${data.riskScore}/100 (${data.riskTier} Tier)`);
       } else {
-        throw new Error('API request failed');
+        const errData = await resp.json().catch(() => ({}));
+        showNotification(
+          'warning',
+          'AI Fraud Scan Unavailable',
+          errData.error || 'Gemini AI could not complete the risk scan. Verify GEMINI_API_KEY in Settings > Secrets.'
+        );
       }
     } catch {
-      // Deterministic evaluation fallback
-      const isSuspended = user.status === 'suspended';
-      const fallbackReport = {
-        riskScore: isSuspended ? 88 : user.twoFactorEnabled ? 8 : 22,
-        riskTier: isSuspended ? 'High' : user.twoFactorEnabled ? 'Low' : 'Medium',
-        summary: `Automated rule engine evaluation for ${user.name} (${user.role}). Audited against Pan-African transaction telemetry across Paystack, M-Pesa, and Ozow.`,
-        fraudSignals: isSuspended
-          ? ['Administrative suspension flag active', '3 chargeback reversals recorded', 'High velocity proxy cluster']
-          : user.twoFactorEnabled
-          ? ['Hardware / TOTP 2FA verified', 'Consistent geographic IP signatures across SADC', 'Zero dispute claims']
-          : ['2FA currently disabled', 'Standard single-factor credential velocity'],
-        recommendations: isSuspended
-          ? ['Maintain withdrawal and ticket transfer locks', 'Require national identity document (ID/Passport) manual verification']
-          : ['Approved for unrestricted ticket purchasing', 'Eligible for instant promoter VIP access'],
-        verifiedIdentityRecommendation: isSuspended ? 'Manual KYC Review Required' : 'Standard Trust Cleared',
-      };
-      setAiRiskReports(prev => ({ ...prev, [user.id]: fallbackReport }));
-      showNotification('info', 'AI Risk Assessment Ready', `Generated local neural risk score: ${fallbackReport.riskScore}/100`);
+      showNotification(
+        'warning',
+        'AI Service Unreachable',
+        'Unable to contact the Gemini AI evaluation endpoint. Please verify server connectivity and try again.'
+      );
     } finally {
       setAiRiskLoading(false);
     }
@@ -390,9 +527,13 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   const handleGenerateExecutiveBrief = async () => {
     setAiExecutiveBriefLoading(true);
     try {
+      const adminToken = getAdminSessionToken() || '';
       const resp = await fetch('/api/ai/executive-brief', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': adminToken,
+        },
         body: JSON.stringify({
           platformMetrics: {
             totalGMVMinor,
@@ -409,27 +550,29 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
         }),
       });
 
+      if (resp.status === 401) {
+        handleLockPlatform();
+        return;
+      }
+
       if (resp.ok) {
         const data = await resp.json();
         setAiExecutiveBrief(data);
         showNotification('success', 'Executive Intelligence Updated', 'Gemini executive brief generated from live ledger telemetry.');
       } else {
-        throw new Error('Executive brief failed');
+        const errData = await resp.json().catch(() => ({}));
+        showNotification(
+          'warning',
+          'Executive Brief Unavailable',
+          errData.error || 'Gemini AI requires GEMINI_API_KEY configured in Settings > Secrets.'
+        );
       }
     } catch {
-      setAiExecutiveBrief({
-        headline: 'Pan-African Event Commerce: Healthy Liquidity & Balanced GAAP Ledger',
-        date: new Date().toLocaleDateString('en-ZA', { dateStyle: 'full' }),
-        keyTakeaways: [
-          `Gross Merchandise Volume cross-clearing across 6 African markets shows +18.4% month-over-month growth at ${formatCurrency(totalGMVMinor, 'ZAR')}.`,
-          'Paystack 3D-Secure, Ozow EFT, and M-Pesa Daraja 2.0 gateway success rates remain optimal at 99.8%.',
-          'Zero double-entry reconciliation drift: Total debits strictly equal total credits across Account 1010 and Account 2010.',
-          `${users.length} registered platform users audited; ${users.filter(u => u.status === 'suspended').length} high-risk account isolated under automated fraud protection.`,
-        ],
-        strategicGuidance: 'Authorize expansion waves for Ghana and Rwanda while maintaining dispute reserves in Account 2010. Retain AI Anti-Scalp engine active for upcoming amphitheatre sell-outs.',
-        generatedAt: new Date().toISOString(),
-      });
-      showNotification('info', 'Executive Brief Loaded', 'Synthesized platform performance metrics.');
+      showNotification(
+        'warning',
+        'Executive Brief Unreachable',
+        'Unable to reach the Gemini AI executive briefing endpoint. Please retry.'
+      );
     } finally {
       setAiExecutiveBriefLoading(false);
     }
@@ -504,7 +647,14 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
   const handlePingSupabase = async () => {
     setSupabaseChecking(true);
     try {
-      const res = await fetch('/api/supabase/status');
+      const adminToken = getAdminSessionToken() || '';
+      const res = await fetch('/api/supabase/status', {
+        headers: { 'X-Admin-Token': adminToken },
+      });
+      if (res.status === 401) {
+        handleLockPlatform();
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setSupabaseStatus(data);
@@ -532,20 +682,39 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     setKeyRotateError(null);
     setKeyRotateSuccess(null);
 
+    const cleanedUrl = newUrlInput.trim();
+    if (cleanedUrl && !isSafeHttpsUrl(cleanedUrl)) {
+      setKeyRotateError('Invalid Supabase URL. Must be a public HTTPS URL.');
+      return;
+    }
+
+    const adminToken = getAdminSessionToken();
+    if (!adminToken) {
+      handleLockPlatform();
+      return;
+    }
+
     try {
       const resp = await fetch('/api/admin/rotate-keys', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': adminToken,
+        },
         body: JSON.stringify({
-          passkey: rotatePasskeyInput.trim(),
+          passkey: rotatePasskeyInput.trim() || undefined,
           newAnonKey: newAnonKeyInput.trim() || undefined,
-          newUrl: newUrlInput.trim() || undefined,
+          newUrl: cleanedUrl || undefined,
         }),
       });
 
+      if (resp.status === 401) {
+        handleLockPlatform();
+        return;
+      }
+
       if (resp.ok) {
-        // Also rotate client-side
-        rotateSupabaseKeys(newUrlInput.trim() || undefined, newAnonKeyInput.trim() || undefined);
+        rotateSupabaseKeys(cleanedUrl || undefined, newAnonKeyInput.trim() || undefined);
         setKeyRotateSuccess('Cryptographic credentials rotated into active memory successfully!');
         setNewAnonKeyInput('');
         setNewUrlInput('');
@@ -573,6 +742,20 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
       })
       .catch(() => {
         showNotification('info', 'Schema Available', 'Schema file is available at /supabase_schema.sql in the project.');
+      });
+  };
+
+  const handleCopyAuthFixSql = () => {
+    fetch('/supabase_auth_fix.sql')
+      .then(res => res.text())
+      .then(sql => {
+        navigator.clipboard.writeText(sql);
+        setCopiedAuthFix(true);
+        showNotification('success', 'Auth Fix SQL Copied to Clipboard', 'Paste into Supabase SQL Editor and click Run to fix user sign-up.');
+        setTimeout(() => setCopiedAuthFix(false), 3000);
+      })
+      .catch(() => {
+        showNotification('info', 'Auth Fix Available', 'Schema file is available at /supabase_auth_fix.sql in the project.');
       });
   };
 
@@ -608,14 +791,14 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
   const handleToggleFeaturedEvent = (eventId: string, currentFeatured: boolean) => {
     store.updateEvent(eventId, { featured: !currentFeatured });
-    setEvents([...store.getEvents()]);
+    setEvents([...store.getPlatformEvents()]);
     showNotification('success', 'Marketplace Spotlight', `Event ${!currentFeatured ? 'promoted to' : 'removed from'} marketplace hero spotlight.`);
   };
 
   const handleToggleEventStatus = (eventId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'published' ? 'draft' : 'published';
     store.updateEvent(eventId, { status: nextStatus });
-    setEvents([...store.getEvents()]);
+    setEvents([...store.getPlatformEvents()]);
     showNotification('info', 'Event Status Modified', `Event status transitioned to ${nextStatus.toUpperCase()}.`);
   };
 
@@ -698,50 +881,87 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     }
   };
 
-  // Super Admin Passkey Gate State
-  const [passkeyInput, setPasskeyInput] = useState('');
-  const [showPasskeyText, setShowPasskeyText] = useState(false);
-  const [passkeyError, setPasskeyError] = useState<string | null>(null);
-  const [isPasskeyAuthorized, setIsPasskeyAuthorized] = useState<boolean>(() => {
-    try {
-      return sessionStorage.getItem('nexora_superadmin_auth') === 'granted';
-    } catch {
-      return false;
-    }
-  });
-
-  const handlePasskeySubmit = (e: React.FormEvent) => {
+  const handlePasskeySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasskeyError(null);
     const cleaned = passkeyInput.trim();
     if (!cleaned) {
-      setPasskeyError('Please enter the root passkey to access the platform.');
+      setPasskeyError('Please enter a passkey to access the platform.');
       return;
     }
-    // Strict passkey verification - no simulation
-    if (cleaned === 'NEXORA-0102@') {
-      try {
-        sessionStorage.setItem('nexora_superadmin_auth', 'granted');
-      } catch {
-        // Fallback for private mode
+
+    if (bootstrapMode === 'needs_bootstrap') {
+      if (cleaned.length < 10) {
+        setPasskeyError('Initial root passkey must be at least 10 characters.');
+        return;
       }
+      if (cleaned !== confirmPasskeyInput.trim()) {
+        setPasskeyError('Passkeys do not match. Re-enter to confirm.');
+        return;
+      }
+
+      setPasskeyVerifying(true);
+      try {
+        const res = await fetch('/api/admin/bootstrap-passkey', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passkey: cleaned }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.token) {
+          setPasskeyError(data.error || 'Could not claim initial root passkey.');
+          return;
+        }
+        setAdminSessionToken(data.token);
+        setBootstrapMode('claimed');
+        setIsPasskeyAuthorized(true);
+        setPasskeyInput('');
+        setConfirmPasskeyInput('');
+        setPasskeyError(null);
+      } catch {
+        setPasskeyError('Unable to reach initialization endpoint. Please retry.');
+      } finally {
+        setPasskeyVerifying(false);
+      }
+      return;
+    }
+
+    setPasskeyVerifying(true);
+    try {
+      const res = await fetch('/api/admin/verify-passkey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passkey: cleaned }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.needsBootstrap) {
+        setBootstrapMode('needs_bootstrap');
+        setPasskeyError('No root passkey is configured yet. Create your initial passkey below (10+ characters).');
+        return;
+      }
+      if (!res.ok || !data.token) {
+        setPasskeyError(data.error || 'Access Denied: Invalid root passkey.');
+        setPasskeyInput('');
+        return;
+      }
+
+      setAdminSessionToken(data.token);
       setIsPasskeyAuthorized(true);
       setPasskeyInput('');
       setPasskeyError(null);
-    } else {
-      setPasskeyError('Access Denied: Invalid root passkey. Authorization failed.');
-      setPasskeyInput('');
+    } catch {
+      setPasskeyError('Unable to reach verification gateway. Please retry.');
+    } finally {
+      setPasskeyVerifying(false);
     }
   };
 
   const handleLockPlatform = () => {
-    try {
-      sessionStorage.removeItem('nexora_superadmin_auth');
-    } catch {
-      // Ignore
-    }
+    clearAdminSessionToken();
     setIsPasskeyAuthorized(false);
     setPasskeyInput('');
+    setConfirmPasskeyInput('');
     setPasskeyError(null);
   };
 
@@ -803,8 +1023,8 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
       label: 'Fleet Gate Scanners',
       subtitle: 'Live turnstiles & access mesh',
       icon: QrCode,
-      badge: '4 Active',
-      badgeColor: 'emerald'
+      badge: activeGateNodes.length > 0 ? `${activeGateNodes.length} Active` : 'Standby',
+      badgeColor: activeGateNodes.length > 0 ? 'emerald' : 'neutral'
     },
     {
       id: 'webhooks' as const,
@@ -874,9 +1094,16 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
             </div>
 
             <form onSubmit={handlePasskeySubmit} className="space-y-4">
+              {bootstrapMode === 'needs_bootstrap' && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs leading-relaxed">
+                  <strong className="block font-bold mb-0.5">First-Run Setup Required</strong>
+                  Set a 10+ character Root Passkey to initialize governance access, or configure <code className="font-mono">SUPERADMIN_PASSKEY</code> in Settings &gt; Secrets.
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-mono font-bold uppercase tracking-wider mb-2 opacity-80">
-                  Root Authorization Passkey
+                  {bootstrapMode === 'needs_bootstrap' ? 'Create Initial Root Passkey' : 'Root Authorization Passkey'}
                 </label>
                 <div className="relative">
                   <KeyRound className="w-4 h-4 absolute left-3.5 top-3.5 opacity-40" />
@@ -887,7 +1114,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       setPasskeyInput(e.target.value);
                       if (passkeyError) setPasskeyError(null);
                     }}
-                    placeholder="Enter root passkey..."
+                    placeholder={bootstrapMode === 'needs_bootstrap' ? 'Minimum 10 characters...' : 'Enter root passkey...'}
                     autoFocus
                     required
                     className={`w-full pl-10 pr-11 py-3 text-sm font-mono rounded-xl border transition-all focus:outline-none ${
@@ -910,6 +1137,32 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 </div>
               </div>
 
+              {bootstrapMode === 'needs_bootstrap' && (
+                <div>
+                  <label className="block text-xs font-mono font-bold uppercase tracking-wider mb-2 opacity-80">
+                    Confirm Root Passkey
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 absolute left-3.5 top-3.5 opacity-40" />
+                    <input
+                      type={showPasskeyText ? 'text' : 'password'}
+                      value={confirmPasskeyInput}
+                      onChange={(e) => {
+                        setConfirmPasskeyInput(e.target.value);
+                        if (passkeyError) setPasskeyError(null);
+                      }}
+                      placeholder="Re-enter passkey..."
+                      required
+                      className={`w-full pl-10 pr-4 py-3 text-sm font-mono rounded-xl border transition-all focus:outline-none ${
+                        isDark
+                          ? 'bg-black/60 border-white/15 text-white placeholder-white/30 focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/20'
+                          : 'bg-neutral-50 border-black/15 text-black placeholder-black/30 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20'
+                      }`}
+                    />
+                  </div>
+                </div>
+              )}
+
               {passkeyError && (
                 <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-start gap-2.5">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -922,10 +1175,17 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-3 px-4 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-[0.99]"
+                disabled={passkeyVerifying || bootstrapMode === 'loading'}
+                className="w-full py-3 px-4 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-[0.99] disabled:opacity-60"
               >
                 <Unlock className="w-4 h-4 text-black" />
-                <span>Verify Passkey & Access</span>
+                <span>
+                  {passkeyVerifying
+                    ? 'Verifying...'
+                    : bootstrapMode === 'needs_bootstrap'
+                    ? 'Initialize Passkey & Enter'
+                    : 'Verify Passkey & Access'}
+                </span>
               </button>
             </form>
 
@@ -1191,7 +1451,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
           {/* Root Profile */}
           <div className="flex items-center justify-between pt-1 text-[10px] font-mono opacity-50">
-            <span>Auth: Kagiso Khumalo</span>
+            <span>Auth: {store.getCurrentUser()?.name || 'Root Administrator'}</span>
             <span className="text-amber-400">Root-3</span>
           </div>
 
@@ -1290,7 +1550,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
             <button
               onClick={() => {
                 setOrganizers([...store.getOrganizers()]);
-                setEvents([...store.getEvents()]);
+                setEvents([...store.getPlatformEvents()]);
                 setLaunchGates([...store.getLaunchGates()]);
                 setWebhookLogs([...store.getWebhookLogs()]);
                 setLedgerEntries([...store.getLedgerEntries()]);
@@ -1412,7 +1672,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 </div>
                 <div className="flex items-center gap-2 mt-2 text-[11px] font-mono text-emerald-400">
                   <TrendingUp className="w-3 h-3" />
-                  <span>{totalGMVMinor > 0 ? '+18.4% volume' : 'Baseline 0.00 — Ready for live checkouts'}</span>
+                  <span>{totalGMVMinor > 0 ? 'Live settled volume' : 'Baseline 0.00 — Ready for live checkouts'}</span>
                 </div>
                 <div className="text-[10px] opacity-50 font-mono mt-1">
                   Cross-cleared across ZAR, KES, NGN, GHS, RWF
@@ -1489,7 +1749,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     <h3 className="text-sm font-bold font-mono">Pan-African Gateway & Edge Infrastructure</h3>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                    99.99% Operational Uptime
+                    Gateway Mesh Ready
                   </span>
                 </div>
 
@@ -1500,8 +1760,8 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       <span className="font-bold">Paystack (ZA, NG, GH)</span>
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     </div>
-                    <div className="text-xs font-mono opacity-60 mt-1">Latency: 18ms · 3DS Active</div>
-                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Webhook sig: SHA512 Verified</div>
+                    <div className="text-xs font-mono opacity-60 mt-1">3DS Cards & EFT Standby</div>
+                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Webhook sig: SHA512 Enforced</div>
                   </div>
 
                   <div className={`p-3 rounded-xl border ${isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'}`}>
@@ -1509,8 +1769,8 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       <span className="font-bold">M-Pesa Daraja 2.0 (KE)</span>
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     </div>
-                    <div className="text-xs font-mono opacity-60 mt-1">STK Push Rate: 99.4%</div>
-                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Safaricom B2C Bridge Live</div>
+                    <div className="text-xs font-mono opacity-60 mt-1">STK Push Receiver Standby</div>
+                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Safaricom B2C Bridge Ready</div>
                   </div>
 
                   <div className={`p-3 rounded-xl border ${isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'}`}>
@@ -1518,8 +1778,8 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       <span className="font-bold">Flutterwave (All Africa)</span>
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     </div>
-                    <div className="text-xs font-mono opacity-60 mt-1">Latency: 34ms · Multi-Currency</div>
-                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Mobile Money clearing OK</div>
+                    <div className="text-xs font-mono opacity-60 mt-1">Multi-Currency Rail Ready</div>
+                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Mobile Money clearing Ready</div>
                   </div>
 
                   <div className={`p-3 rounded-xl border ${isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'}`}>
@@ -1528,7 +1788,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     </div>
                     <div className="text-xs font-mono opacity-60 mt-1">Capitec, Standard, FNB, Nedbank</div>
-                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Direct bank clearing OK</div>
+                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Direct bank clearing Ready</div>
                   </div>
 
                   <div className={`p-3 rounded-xl border ${isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'}`}>
@@ -1536,17 +1796,21 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       <span className="font-bold">Double-Entry Journal</span>
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                     </div>
-                    <div className="text-xs font-mono opacity-60 mt-1">Invariant: Balanced</div>
-                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">0 reconciliation drift</div>
+                    <div className="text-xs font-mono opacity-60 mt-1">Invariant: {isLedgerBalanced ? 'Balanced' : 'Drift'}</div>
+                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">{ledgerEntries.length} posted ledger entries</div>
                   </div>
 
                   <div className={`p-3 rounded-xl border ${isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'}`}>
                     <div className="flex items-center justify-between text-xs font-mono">
                       <span className="font-bold">Edge Ticket Gate Fleet</span>
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      <span className={`w-2 h-2 rounded-full ${activeGateNodes.length > 0 ? 'bg-emerald-400' : 'bg-white/30'}`} />
                     </div>
-                    <div className="text-xs font-mono opacity-60 mt-1">4 Entry Gates Online</div>
-                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">Real-time mesh sync active</div>
+                    <div className="text-xs font-mono opacity-60 mt-1">
+                      {activeGateNodes.length > 0 ? `${activeGateNodes.length} Entry Gates Active` : '0 Entry Gates Online'}
+                    </div>
+                    <div className="text-[10px] text-emerald-400 font-mono mt-0.5">
+                      {allCheckInLogs.length > 0 ? `${allCheckInLogs.length} scans synchronized` : 'Mesh standby for gate scans'}
+                    </div>
                   </div>
 
                 </div>
@@ -1670,7 +1934,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     <h3 className="text-sm font-bold font-mono">Pending Governance Actions</h3>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                    {organizers.filter(o => o.verificationStatus !== 'verified').length} Items
+                    {organizers.filter(o => o.verificationStatus !== 'verified').length + pendingPayouts.length} Items
                   </span>
                 </div>
 
@@ -1701,20 +1965,35 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     </div>
                   ))}
 
-                  <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
-                    isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'
-                  }`}>
-                    <div>
-                      <div className="text-xs font-mono font-bold">Post-Event Clearing: Joburg Innovation</div>
-                      <div className="text-[10px] opacity-60 font-mono">R340,000 awaiting audit sign-off</div>
-                    </div>
-                    <button
-                      onClick={() => setCurrentSection('ledger')}
-                      className="px-2.5 py-1 rounded border border-white/20 hover:bg-white/10 text-[11px] font-mono font-semibold shrink-0 cursor-pointer"
+                  {pendingPayouts.map(payout => (
+                    <div
+                      key={payout.id}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
+                        isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'
+                      }`}
                     >
-                      Audit Ledger →
-                    </button>
-                  </div>
+                      <div>
+                        <div className="text-xs font-mono font-bold">Payout Clearing: {payout.id}</div>
+                        <div className="text-[10px] opacity-60 font-mono">
+                          {formatCurrency(payout.amountMinor, payout.currency)} ({payout.destinationAccount}) awaiting audit sign-off
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setCurrentSection('ledger')}
+                        className="px-2.5 py-1 rounded border border-white/20 hover:bg-white/10 text-[11px] font-mono font-semibold shrink-0 cursor-pointer"
+                      >
+                        Audit Ledger →
+                      </button>
+                    </div>
+                  ))}
+
+                  {organizers.filter(o => o.verificationStatus !== 'verified').length === 0 && pendingPayouts.length === 0 && (
+                    <div className={`p-3 rounded-xl border text-[11px] font-mono opacity-60 ${
+                      isDark ? 'bg-black/30 border-white/5' : 'bg-neutral-50 border-black/5'
+                    }`}>
+                      0 pending KYB dossiers or settlement approvals in queue.
+                    </div>
+                  )}
 
                   <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
                     isDark ? 'bg-black/40 border-white/5' : 'bg-neutral-50 border-black/5'
@@ -1811,7 +2090,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   <ShieldCheck className="w-4 h-4 text-blue-400" />
                 </div>
                 <div className="text-2xl font-black font-mono mt-1.5 text-blue-400">
-                  {Math.round((users.filter(u => u.twoFactorEnabled).length / users.length) * 100)}%
+                  {users.length > 0 ? Math.round((users.filter(u => u.twoFactorEnabled).length / users.length) * 100) : 0}%
                 </div>
                 <div className="text-[10px] opacity-50 font-mono mt-1">
                   TOTP / Hardware key enforced
@@ -3038,13 +3317,13 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                           </td>
 
                           <td className="py-3.5 px-4">
-                            <div className="font-medium">{org.bankDetails?.bankName || 'Standard Bank'}</div>
-                            <div className="text-[10px] opacity-50">Acc: {org.bankDetails?.accountNumber || '••••••••'}</div>
+                            <div className="font-medium">{org.bankDetails?.bankName || 'Pending Setup'}</div>
+                            <div className="text-[10px] opacity-50">Acc: {org.bankDetails?.accountNumber || 'Not Configured'}</div>
                           </td>
 
                           <td className="py-3.5 px-4">
                             <span className="capitalize px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold text-[10px]">
-                              {org.subscriptionPlan || 'Growth'}
+                              {org.subscriptionPlan || 'Starter'}
                             </span>
                             <div className="text-[10px] opacity-60 mt-0.5">
                               Fee: {((org.commissionRate || 0.05) * 100).toFixed(1)}%
@@ -3087,6 +3366,17 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                         </tr>
                       );
                     })}
+                    {filteredOrganizers.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center">
+                          <Building2 className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                          <div className="font-bold text-sm text-white/60">0 Organizers Registered</div>
+                          <div className="text-[11px] opacity-40 mt-1 max-w-sm mx-auto">
+                            New organizer profiles are created automatically when users register as Event Organizers.
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -3167,7 +3457,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   <div>
                     <div className="text-white/40 text-[10px]">CORPORATE REGISTRATION NO.</div>
                     <div className="font-bold text-white">
-                      {activeOrganizer.country === 'ZA' ? '2021/894021/07 (CIPC South Africa)' : 'RC-1849201 (CAC Nigeria)'}
+                      {activeOrganizer.registrationNumber || 'Pending KYB Submission'}
                     </div>
                   </div>
 
@@ -3181,7 +3471,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   <div>
                     <div className="text-white/40 text-[10px]">EXECUTIVE CONTACT</div>
                     <div className="text-white">{activeOrganizer.email}</div>
-                    <div className="text-white/60">{activeOrganizer.phone}</div>
+                    <div className="text-white/60">{activeOrganizer.phone || 'Not provided'}</div>
                   </div>
 
                   <div>
@@ -3189,9 +3479,11 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     <div className="p-3 rounded-lg border border-white/10 bg-black/40 flex items-center justify-between mt-1">
                       <div className="flex items-center gap-2 truncate">
                         <FileText className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span className="text-xs truncate">{activeOrganizer.verificationDocName || 'Statutory_Cert_2026.pdf'}</span>
+                        <span className="text-xs truncate">{activeOrganizer.verificationDocName || 'Not Uploaded Yet'}</span>
                       </div>
-                      <span className="text-[10px] text-emerald-400 font-bold uppercase">SHA-256</span>
+                      <span className="text-[10px] text-emerald-400 font-bold uppercase">
+                        {activeOrganizer.verificationDocName ? 'SHA-256' : 'Pending'}
+                      </span>
                     </div>
                   </div>
 
@@ -3211,7 +3503,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   <div>
                     <div className="text-white/40 text-[10px]">SETTLEMENT BANKING PARTNER</div>
                     <div className="font-bold text-sm text-white">
-                      {activeOrganizer.bankDetails?.bankName || 'Standard Bank of South Africa'}
+                      {activeOrganizer.bankDetails?.bankName || 'Not Configured'}
                     </div>
                   </div>
 
@@ -3221,7 +3513,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       {activeOrganizer.bankDetails?.accountHolder || activeOrganizer.legalEntityName}
                     </div>
                     <div className="text-white/60 font-mono">
-                      Acc No: {activeOrganizer.bankDetails?.accountNumber || '01928471920'}
+                      Acc No: {activeOrganizer.bankDetails?.accountNumber || 'Not Configured'}
                     </div>
                     {activeOrganizer.bankDetails?.branchCode && (
                       <div className="text-white/40 text-[10px]">Branch Code: {activeOrganizer.bankDetails.branchCode}</div>
@@ -3284,32 +3576,41 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   <span>Risk Intelligence & Event Footprint</span>
                 </h3>
 
-                <div className="space-y-3 text-xs font-mono">
-                  
-                  <div className="p-3 rounded-xl border border-white/10 bg-black/40">
-                    <div className="flex items-center justify-between text-xs">
-                      <span>Nexora Risk Score</span>
-                      <span className="font-bold text-emerald-400">12 / 100 (Ultra Low Risk)</span>
-                    </div>
-                    <div className="w-full bg-white/10 h-1.5 rounded-full mt-2 overflow-hidden">
-                      <div className="bg-emerald-400 h-full w-[12%]" />
-                    </div>
-                  </div>
+                {(() => {
+                  const orgEventIds = new Set(events.filter(e => e.organizer?.id === activeOrganizer.id).map(e => e.id));
+                  const orgTickets = allTickets.filter(t => orgEventIds.has(t.eventId));
+                  const checkedInOrgTickets = orgTickets.filter(t => t.status === 'checked_in').length;
+                  const redemptionPct = orgTickets.length > 0 ? ((checkedInOrgTickets / orgTickets.length) * 100).toFixed(1) : '0.0';
+                  const orgRiskLabel = activeOrganizer.verificationStatus === 'verified' ? 'Low Risk' : activeOrganizer.verificationStatus === 'rejected' ? 'Restricted' : 'Pending Review';
 
-                  <div className="space-y-1.5 text-[11px]">
-                    <div className="flex justify-between py-1 border-b border-white/5">
-                      <span className="opacity-60">Chargeback Ratio</span>
-                      <span className="font-bold text-emerald-400">0.00% (Clean)</span>
+                  return (
+                    <div className="space-y-3 text-xs font-mono">
+                      <div className="p-3 rounded-xl border border-white/10 bg-black/40">
+                        <div className="flex items-center justify-between text-xs">
+                          <span>KYB Standing</span>
+                          <span className={`font-bold ${
+                            activeOrganizer.verificationStatus === 'verified' ? 'text-emerald-400' : activeOrganizer.verificationStatus === 'rejected' ? 'text-red-400' : 'text-amber-400'
+                          }`}>{orgRiskLabel}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 text-[11px]">
+                        <div className="flex justify-between py-1 border-b border-white/5">
+                          <span className="opacity-60">Issued Passes</span>
+                          <span className="font-bold text-white">{orgTickets.length}</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-white/5">
+                          <span className="opacity-60">Gate Redemption Rate</span>
+                          <span className="font-bold text-white">{redemptionPct}%</span>
+                        </div>
+                        <div className="flex justify-between py-1 border-b border-white/5">
+                          <span className="opacity-60">Total Active Events</span>
+                          <span className="font-bold text-white">{orgEventIds.size} Events</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex justify-between py-1 border-b border-white/5">
-                      <span className="opacity-60">Gate Redemption Rate</span>
-                      <span className="font-bold text-white">98.4%</span>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-white/5">
-                      <span className="opacity-60">Total Active Events</span>
-                      <span className="font-bold text-white">{events.filter(e => e.organizer?.id === activeOrganizer.id).length} Events</span>
-                    </div>
-                  </div>
+                  );
+                })()}
 
                   {/* Quick Action: Suspend Organizer */}
                   <div className="pt-3">
@@ -3323,8 +3624,6 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       <span>Suspend Organizer & Lock Payouts</span>
                     </button>
                   </div>
-
-                </div>
               </div>
 
             </div>
@@ -3402,6 +3701,17 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
             </div>
 
             {/* Events Grid */}
+            {filteredEvents.length === 0 ? (
+              <div className={`p-12 rounded-2xl border text-center font-mono ${
+                isDark ? 'bg-[#0E121B] border-white/10' : 'bg-white border-black/10 shadow-xs'
+              }`}>
+                <Sparkles className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                <div className="font-bold text-sm text-white/60">0 Organizer-Published Events</div>
+                <div className="text-[11px] opacity-40 mt-1 max-w-sm mx-auto">
+                  Events published live from Organizer Studio will appear here for platform safety moderation and spotlight curation.
+                </div>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredEvents.map(evt => {
                 const org = organizers.find(o => o.id === evt.organizer?.id);
@@ -3448,14 +3758,14 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                       {/* Content details */}
                       <div className="p-5 space-y-3">
                         <div className="text-[11px] font-mono text-amber-400 uppercase font-bold">
-                          {evt.category} · {evt.venue?.city || 'Cape Town'}, {evt.venue?.country || 'ZA'}
+                          {evt.category} · {evt.venue?.city || 'City TBD'}, {evt.venue?.country || '—'}
                         </div>
                         <h3 className="text-base font-bold font-mono text-white leading-snug line-clamp-2">
                           {evt.title}
                         </h3>
                         <div className="text-xs opacity-60 font-mono flex items-center justify-between">
                           <span>Organizer:</span>
-                          <span className="font-bold text-white truncate max-w-[160px]">{org?.name || 'Nexora Promoter'}</span>
+                          <span className="font-bold text-white truncate max-w-[160px]">{org?.name || evt.organizer?.name || 'Registered Organizer'}</span>
                         </div>
                         <div className="text-xs opacity-60 font-mono flex items-center justify-between">
                           <span>Ticket Tiers:</span>
@@ -3507,6 +3817,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 );
               })}
             </div>
+            )}
 
           </div>
         )}
@@ -3576,7 +3887,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     />
                   )}
                   <div className="absolute bottom-3 left-3 bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-lg font-mono text-xs text-white">
-                    Venue: {activeEvent.venue?.name || 'Green Point Track'}, {activeEvent.venue?.city || 'Cape Town'}
+                    Venue: {activeEvent.venue?.name || 'Venue TBD'}, {activeEvent.venue?.city || 'City TBD'}
                   </div>
                 </div>
 
@@ -3618,23 +3929,25 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                     <div>
                       <div className="font-bold text-white">Municipal Event Permit</div>
-                      <div className="text-[10px] opacity-60">Cape Town City Disaster Management clearance active.</div>
+                      <div className="text-[10px] opacity-60">
+                        {activeEvent.status === 'published' ? 'Published clearance status active.' : 'Pending organizer permit review.'}
+                      </div>
                     </div>
                   </div>
 
                   <div className="flex items-start gap-2.5 p-3 rounded-xl border border-white/5 bg-black/30">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                     <div>
-                      <div className="font-bold text-white">Liquor Authority License</div>
-                      <div className="text-[10px] opacity-60">Temporary on-consumption liquor license verified.</div>
+                      <div className="font-bold text-white">Hospitality & Venue Compliance</div>
+                      <div className="text-[10px] opacity-60">Checked per regional venue jurisdiction.</div>
                     </div>
                   </div>
 
                   <div className="flex items-start gap-2.5 p-3 rounded-xl border border-white/5 bg-black/30">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                     <div>
-                      <div className="font-bold text-white">Medical & Fire Safety Plan</div>
-                      <div className="text-[10px] opacity-60">SAPS on-site security detail registered.</div>
+                      <div className="font-bold text-white">Medical & Crowd Safety Plan</div>
+                      <div className="text-[10px] opacity-60">Venue capacity thresholds enforced at turnstiles.</div>
                     </div>
                   </div>
 
@@ -4035,14 +4348,19 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
             </div>
 
             {/* Fleet Gates Grid */}
+            {activeGateNodes.length === 0 ? (
+              <div className={`p-12 rounded-2xl border text-center font-mono ${
+                isDark ? 'bg-[#0E121B] border-white/10' : 'bg-white border-black/10 shadow-xs'
+              }`}>
+                <QrCode className="w-8 h-8 text-white/20 mx-auto mb-2" />
+                <div className="font-bold text-sm text-white/60">0 Active Turnstile Gates Logged</div>
+                <div className="text-[11px] opacity-40 mt-1 max-w-sm mx-auto">
+                  Live gate telemetry nodes populate automatically as gate officers scan tickets in the Guest Scanner app.
+                </div>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[
-                { id: 'gate-main-johannesburg', name: 'Main Entrance - Gate Alpha', event: 'Africa Business Summit 2026', city: 'Johannesburg', online: 3, velocity: 14, rejected: 1 },
-                { id: 'gate-vip-johannesburg', name: 'VIP Fast Track - Gate Bravo', event: 'Africa Business Summit 2026', city: 'Johannesburg', online: 2, velocity: 6, rejected: 0 },
-                { id: 'gate-cape-north', name: 'North Turnstile - Stage 1', event: 'Cape Town Vibes Festival', city: 'Cape Town', online: 4, velocity: 22, rejected: 3 },
-                { id: 'gate-cape-backstage', name: 'Artist & VIP Hospitality', event: 'Cape Town Vibes Festival', city: 'Cape Town', online: 1, velocity: 3, rejected: 0 },
-                { id: 'gate-nairobi-hall', name: 'Expo Hall Primary Gate', event: 'Nairobi Innovation Expo', city: 'Nairobi', online: 2, velocity: 9, rejected: 0 },
-              ].map(gate => (
+              {activeGateNodes.map(gate => (
                 <div 
                   key={gate.id}
                   className={`p-6 rounded-2xl border space-y-4 ${
@@ -4059,12 +4377,12 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
                   <div className="grid grid-cols-3 gap-2 text-center font-mono">
                     <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                      <div className="text-base font-bold text-white">{gate.online}</div>
-                      <div className="text-[10px] opacity-50">Devices Online</div>
+                      <div className="text-base font-bold text-white">1</div>
+                      <div className="text-[10px] opacity-50">Active Node</div>
                     </div>
                     <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                      <div className="text-base font-bold text-emerald-400">{gate.velocity}/m</div>
-                      <div className="text-[10px] opacity-50">Scan Velocity</div>
+                      <div className="text-base font-bold text-emerald-400">{gate.scans}</div>
+                      <div className="text-[10px] opacity-50">Total Scans</div>
                     </div>
                     <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
                       <div className="text-base font-bold text-amber-400">{gate.rejected}</div>
@@ -4087,6 +4405,7 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 </div>
               ))}
             </div>
+            )}
 
           </div>
         )}
@@ -4460,21 +4779,27 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 </h3>
 
                 <div className="space-y-3 font-mono text-xs">
-                  {[
-                    { name: 'Kagiso Khumalo', role: 'Lead Platform Architect', level: 'Root (Tier 3)', email: 'kagiso@nexora.events' },
-                    { name: 'Amara Okafor', role: 'Risk & Fraud Operations Director', level: 'Admin (Tier 2)', email: 'amara@nexora.events' },
-                    { name: 'David Mokoena', role: 'Head of Treasury & Settlement', level: 'Auditor (Tier 2)', email: 'david@nexora.events' },
-                  ].map(admin => (
-                    <div key={admin.email} className="p-3 rounded-xl border border-white/5 bg-black/30 flex items-center justify-between">
-                      <div>
-                        <div className="font-bold text-white">{admin.name}</div>
-                        <div className="text-[10px] opacity-60">{admin.role} · {admin.email}</div>
+                  {(() => {
+                    const adminUsers = users.filter(u => u.role === 'admin');
+                    if (adminUsers.length === 0) {
+                      return (
+                        <div className="p-4 rounded-xl border border-white/5 bg-black/30 text-center opacity-60">
+                          0 Admin Accounts Registered in Directory. Accounts assigned the Admin role appear here in real time.
+                        </div>
+                      );
+                    }
+                    return adminUsers.map(admin => (
+                      <div key={admin.id} className="p-3 rounded-xl border border-white/5 bg-black/30 flex items-center justify-between">
+                        <div>
+                          <div className="font-bold text-white">{admin.name}</div>
+                          <div className="text-[10px] opacity-60">Platform Admin · {admin.email}</div>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          Root / Admin
+                        </span>
                       </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                        {admin.level}
-                      </span>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
 
@@ -4524,10 +4849,19 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
                     <button
                       onClick={handleCopySchemaSql}
-                      className="px-3.5 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      className="px-3.5 py-1.5 rounded-xl border border-white/10 hover:bg-white/10 text-white/70 hover:text-white text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer"
                     >
-                      {copiedSchema ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Download className="w-3.5 h-3.5 text-emerald-400" />}
-                      <span>{copiedSchema ? 'SQL Copied!' : 'Copy Schema SQL'}</span>
+                      {copiedSchema ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Download className="w-3.5 h-3.5" />}
+                      <span>{copiedSchema ? 'SQL Copied!' : 'Copy Master Schema'}</span>
+                    </button>
+
+                    <button
+                      onClick={handleCopyAuthFixSql}
+                      className="px-3.5 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Copy SQL patch that resolves 'Database error saving new user'"
+                    >
+                      {copiedAuthFix ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Sparkles className="w-3.5 h-3.5 text-amber-400" />}
+                      <span>{copiedAuthFix ? 'Auth Patch Copied!' : 'Copy Auth Fix Patch SQL'}</span>
                     </button>
                   </div>
                 </div>
@@ -4562,26 +4896,35 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                   </div>
                 </div>
 
-                {/* Schema Setup Notice */}
-                <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs font-mono">
-                  <div className="space-y-0.5">
-                    <div className="font-bold text-emerald-300 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      <span>Supabase Credentials Loaded & Keys Rotated into Runtime</span>
+                {/* Auth Trigger Diagnostic Callout */}
+                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs font-mono">
+                  <div className="space-y-1">
+                    <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Resolution for "Database error saving new user"</span>
                     </div>
-                    <div className="text-[11px] opacity-70">
-                      If you haven't executed the database schema yet: Click "Copy Schema SQL", navigate to your Supabase Dashboard &gt; SQL Editor, paste the SQL script, and click "Run" to initialize all 20 tables, RLS policies, and triggers.
+                    <div className="text-[11px] opacity-80 leading-relaxed">
+                      This error occurs when the Supabase GoTrue trigger <code className="bg-black/40 px-1 py-0.5 rounded text-amber-200">handle_new_user()</code> runs without an explicit search path or schema permissions. Run the 15-line Auth Fix Patch in your Supabase SQL Editor to apply permissions and exception handling.
                     </div>
                   </div>
-                  <a
-                    href={`https://supabase.com/dashboard/project/${supabaseStatus.projectId}/sql`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="shrink-0 px-3 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                  >
-                    <span>Open Supabase SQL Editor</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={handleCopyAuthFixSql}
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold font-mono flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
+                    >
+                      {copiedAuthFix ? <Check className="w-3.5 h-3.5 text-black" /> : <Sparkles className="w-3.5 h-3.5 text-black" />}
+                      <span>{copiedAuthFix ? 'Copied!' : 'Copy Auth Patch'}</span>
+                    </button>
+                    <a
+                      href={`https://supabase.com/dashboard/project/${supabaseStatus.projectId}/sql`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/10 text-white text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <span>Open SQL Editor</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
                 </div>
               </div>
 
@@ -4703,13 +5046,12 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
               </div>
 
               <div className="pt-2 border-t border-inherit">
-                <label className="text-[10px] font-bold text-amber-400 block mb-1">SOVEREIGN ROOT PASSKEY REQUIRED FOR ROTATION</label>
+                <label className="text-[10px] font-bold text-amber-400 block mb-1">ROOT PASSKEY (REQUIRED WHEN CONFIGURED ON SERVER)</label>
                 <input
                   type="password"
                   value={rotatePasskeyInput}
                   onChange={(e) => setRotatePasskeyInput(e.target.value)}
                   placeholder="Enter Root Authorization Passkey..."
-                  required
                   className={`w-full p-2.5 rounded-xl border focus:outline-none focus:border-amber-400 font-mono text-xs ${
                     isDark ? 'bg-black/50 border-white/10 text-white' : 'bg-neutral-50 border-black/10 text-black'
                   }`}

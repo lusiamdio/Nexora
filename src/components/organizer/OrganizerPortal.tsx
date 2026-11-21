@@ -70,10 +70,12 @@ import {
   MarketingCampaign,
   PriorityTask,
   ActivityFeedItem,
-  Ticket
+  Ticket,
+  AuthUser
 } from '../../types';
 import { store } from '../../lib/store';
 import { formatCurrency, formatEventDate, formatEventTime } from '../../lib/currencies';
+import { downloadSafeCsv } from '../../lib/security';
 
 import heroFestivalImg from '../../assets/images/hero_afro_festival_1791591623547.jpg';
 import techSummitImg from '../../assets/images/event_tech_summit_1791591635169.jpg';
@@ -91,6 +93,7 @@ import { WaitlistReclamationDrawer } from '../admin/WaitlistReclamationDrawer';
 import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
 
 interface OrganizerPortalProps {
+  currentUser?: AuthUser | null;
   onBackToMarketplace: () => void;
   onEventCreated: (event: Event) => void;
   onLaunchScanner?: () => void;
@@ -98,6 +101,7 @@ interface OrganizerPortalProps {
 }
 
 export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
+  currentUser,
   onBackToMarketplace,
   onEventCreated,
   onLaunchScanner,
@@ -168,20 +172,35 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
   };
 
   // Store data state
-  const [organizers, setOrganizers] = useState<OrganizerProfile[]>(store.getOrganizers());
-  const [selectedOrgId, setSelectedOrgId] = useState<string>(organizers[0]?.id || 'org-cape-vibes');
+  const effectiveUser = currentUser || store.getCurrentUser();
+  const [organizers, setOrganizers] = useState<OrganizerProfile[]>(() => {
+    if (effectiveUser && effectiveUser.role !== 'attendee') {
+      store.ensureOrganizerForUser(effectiveUser);
+    }
+    return store.getOrganizers();
+  });
+  const [selectedOrgId, setSelectedOrgId] = useState<string>(() => {
+    if (effectiveUser?.organizationId) return effectiveUser.organizationId;
+    return store.getOrganizers()[0]?.id || '';
+  });
 
   const currentOrg = organizers.find(o => o.id === selectedOrgId) || organizers[0];
-  const allEvents = store.getEvents().filter(e => e.organizer.id === currentOrg.id || e.organizer.name.includes(currentOrg.name));
+  const currentOrgId = currentOrg?.id || '';
+  const allEvents = currentOrg
+    ? store.getPlatformEvents().filter(e => e.organizer.id === currentOrg.id)
+    : [];
   const allTickets = store.getTickets().filter(t => allEvents.some(e => e.id === t.eventId));
-  const orgBalance = store.getOrganizerBalance(currentOrg.id);
-  const ledgerEntries = store.getLedgerEntries(currentOrg.id);
-  const refundRequests = store.getRefundRequests(currentOrg.id);
-  const teamMembers = store.getTeamMembers(currentOrg.id);
+  const orgBalance = currentOrgId
+    ? store.getOrganizerBalance(currentOrgId)
+    : { grossMinor: 0, platformFeeMinor: 0, payoutsCompletedMinor: 0, refundsReversedMinor: 0, availablePayoutMinor: 0 };
+  const ledgerEntries = currentOrgId ? store.getLedgerEntries(currentOrgId) : [];
+  const refundRequests = currentOrgId ? store.getRefundRequests(currentOrgId) : [];
+  const teamMembers = currentOrgId ? store.getTeamMembers(currentOrgId) : [];
   const venueRFPs = store.getVenueRFPs();
   const marketingCampaigns = store.getMarketingCampaigns();
   const priorityTasks = store.getPriorityTasks();
   const activityFeed = store.getActivityFeed();
+  const checkInLogs = store.getCheckInLogs();
 
   // Search & Filters across modules
   const [eventFilterStatus, setEventFilterStatus] = useState<string>('all');
@@ -258,34 +277,34 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
   };
 
   // Form states for RFP
-  const [rfpVenueName, setRfpVenueName] = useState('Green Point Amphitheatre & Track');
-  const [rfpAttendees, setRfpAttendees] = useState(1500);
-  const [rfpTargetDate, setRfpTargetDate] = useState('2026-11-20');
-  const [rfpBudget, setRfpBudget] = useState('R 75,000');
-  const [rfpContact, setRfpContact] = useState('Thabo Mokoena (Lead Curator)');
+  const [rfpVenueName, setRfpVenueName] = useState('');
+  const [rfpAttendees, setRfpAttendees] = useState(100);
+  const [rfpTargetDate, setRfpTargetDate] = useState('');
+  const [rfpBudget, setRfpBudget] = useState('');
+  const [rfpContact, setRfpContact] = useState(effectiveUser?.name || '');
 
   // Form states for Campaign
-  const [campaignTitle, setCampaignTitle] = useState('Spring Amapiano Flash Announcement');
-  const [campaignAudience, setCampaignAudience] = useState('All South Africa Past Attendees');
+  const [campaignTitle, setCampaignTitle] = useState('');
+  const [campaignAudience, setCampaignAudience] = useState('Confirmed Attendees');
   const [campaignType, setCampaignType] = useState<'email' | 'promoter' | 'social'>('email');
 
   // Form states for Session
   const [sessionEventId, setSessionEventId] = useState(allEvents[0]?.id || '');
-  const [sessionTitle, setSessionTitle] = useState('Keynote: Scaling African Event Tech Across Borders');
-  const [sessionTime, setSessionTime] = useState('11:00 AM');
-  const [sessionSpeaker, setSessionSpeaker] = useState('Amina Mohamed (Managing Partner)');
-  const [sessionStage, setSessionStage] = useState('Main Plenary Stage');
+  const [sessionTitle, setSessionTitle] = useState('');
+  const [sessionTime, setSessionTime] = useState('');
+  const [sessionSpeaker, setSessionSpeaker] = useState('');
+  const [sessionStage, setSessionStage] = useState('');
 
   // Form states for Promo Code
-  const [newPromoCode, setNewPromoCode] = useState('NEXORAVIP25');
-  const [newPromoDiscount, setNewPromoDiscount] = useState(25);
+  const [newPromoCode, setNewPromoCode] = useState('');
+  const [newPromoDiscount, setNewPromoDiscount] = useState(15);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastSentAlert, setBroadcastSentAlert] = useState(false);
 
   // Manual Attendee Registration Form
-  const [newAttendeeName, setNewAttendeeName] = useState('Sipho Dlamini');
-  const [newAttendeeEmail, setNewAttendeeEmail] = useState('sipho.d@innovate.africa');
-  const [newAttendeePhone, setNewAttendeePhone] = useState('+27 82 459 2910');
+  const [newAttendeeName, setNewAttendeeName] = useState('');
+  const [newAttendeeEmail, setNewAttendeeEmail] = useState('');
+  const [newAttendeePhone, setNewAttendeePhone] = useState('');
   const [newAttendeeEventId, setNewAttendeeEventId] = useState(allEvents[0]?.id || '');
   const [newAttendeeTierId, setNewAttendeeTierId] = useState('');
 
@@ -293,48 +312,39 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
   const [manualCheckInCode, setManualCheckInCode] = useState('');
   const [manualCheckInResult, setManualCheckInResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
 
-  // Attendee Hub Interactive simulation state
+  // Attendee Hub Interactive state
   const [hubSelectedPoll, setHubSelectedPoll] = useState<number | null>(null);
-  const [pollVotes, setPollVotes] = useState({ 1: 42, 2: 78, 3: 29 });
+  const [pollVotes, setPollVotes] = useState({ 1: 0, 2: 0, 3: 0 });
   const [qaInput, setQaInput] = useState('');
-  const [qaQuestions, setQaQuestions] = useState([
-    { id: 'q1', author: 'Nia Adeyemi', text: 'Will workshop slides be shared via the Attendee Hub after the sessions?', upvotes: 14, voted: false },
-    { id: 'q2', author: 'Kofi Mensah', text: 'Where is the VIP networking reception taking place on Saturday evening?', upvotes: 9, voted: false },
-  ]);
+  const [qaQuestions, setQaQuestions] = useState<Array<{ id: string; author: string; text: string; upvotes: number; voted: boolean }>>([]);
 
-  // Integration connection states
-  const [integrations, setIntegrations] = useState([
-    { id: 'paystack', name: 'Paystack Rails', category: 'Payment Gateway', status: true, desc: 'Accept cards, bank transfers & USSD in Nigeria & Ghana' },
-    { id: 'mpesa', name: 'Safaricom M-Pesa Express', category: 'Mobile Money', status: true, desc: 'Direct STK Push payments for East African attendees' },
-    { id: 'ozow', name: 'Ozow Instant EFT', category: 'Payment Gateway', status: true, desc: 'Zero-friction bank clearance across South Africa' },
-    { id: 'stripe', name: 'Stripe Global Card Rails', category: 'Payment Gateway', status: true, desc: 'International USD/EUR/GBP card checkout' },
-    { id: 'mailchimp', name: 'Mailchimp Sync', category: 'Marketing', status: true, desc: 'Automated subscriber audience segmentation' },
-    { id: 'zapier', name: 'Zapier Webhooks', category: 'Automation', status: false, desc: 'Trigger CRM flows on confirmed ticket issuance' },
-    { id: 'slack', name: 'Slack Gate Alerts', category: 'Operations', status: true, desc: 'Real-time VIP check-in alerts into private channel' },
-  ]);
+  // Integration connection states synced with real organizer store
+  const [integrationsRefresh, setIntegrationsRefresh] = useState(0);
+  const integrations = currentOrgId ? store.getOrganizerIntegrations(currentOrgId) : [];
 
   const toggleIntegration = (id: string) => {
-    setIntegrations(prev => prev.map(item => item.id === id ? { ...item, status: !item.status } : item));
+    if (!currentOrgId) return;
+    store.toggleIntegrationStatus(currentOrgId, id);
+    setIntegrationsRefresh(prev => prev + 1);
     showNotification('Integration status updated.');
   };
 
   // Event Creation Wizard State
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7>(1);
-  const [newTitle, setNewTitle] = useState('Kigali Creative Arts & Beats Fest');
+  const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState<'Concerts & Music' | 'Tech & Innovation' | 'Food & Wine' | 'Arts & Culture'>('Concerts & Music');
   const [newFormat, setNewFormat] = useState<'in_person' | 'online' | 'hybrid'>('in_person');
-  const [newDescription, setNewDescription] = useState('A celebration of modern East African sound, visual arts, and culinary popups at Kigali Convention Arena.');
-  const [newStartDate, setNewStartDate] = useState('2026-12-10T15:00:00Z');
-  const [newEndDate, setNewEndDate] = useState('2026-12-11T01:00:00Z');
-  const [newVenueName, setNewVenueName] = useState('Kigali Convention Arena & Gardens');
-  const [newAddress, setNewAddress] = useState('KG 2 Roundabout, Kimihurura');
-  const [newCity, setNewCity] = useState('Kigali');
-  const [newCountry, setNewCountry] = useState('Rwanda');
+  const [newDescription, setNewDescription] = useState('');
+  const [newStartDate, setNewStartDate] = useState('');
+  const [newEndDate, setNewEndDate] = useState('');
+  const [newVenueName, setNewVenueName] = useState('');
+  const [newAddress, setNewAddress] = useState('');
+  const [newCity, setNewCity] = useState('');
+  const [newCountry, setNewCountry] = useState('South Africa');
   const [newCoverImage, setNewCoverImage] = useState(heroFestivalImg);
   const [newRefundPolicy, setNewRefundPolicy] = useState('Full refund up to 7 days before event opening.');
   const [newTiers, setNewTiers] = useState<Array<{ name: string; priceMinor: number; capacity: number }>>([
-    { name: 'Standard General Entry', priceMinor: 35000, capacity: 800 },
-    { name: 'VIP Terrace & Lounge', priceMinor: 95000, capacity: 150 },
+    { name: 'General Entry', priceMinor: 25000, capacity: 100 },
   ]);
 
   // Action handlers
@@ -345,128 +355,32 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
     showNotification('Task resolved successfully.');
   };
 
-  const handleCreateSampleEvent = () => {
-    const sampleEvent = store.createEvent({
-      slug: 'sample-pan-african-sound-forum-' + Date.now().toString().slice(-4),
-      title: 'Pan-African Sound & Music Forum 2026',
-      category: 'Concerts & Music',
-      format: 'hybrid',
-      description: 'Industry convening celebrating producers, artists, and live concert innovators from Lagos to Cape Town.',
-      shortSummary: 'High-energy music summit and live showcases featuring premier continental acts.',
-      coverImage: heroFestivalImg,
-      gallery: [heroFestivalImg],
-      startDate: '2026-11-25T14:00:00Z',
-      endDate: '2026-11-26T22:00:00Z',
-      timezone: 'Africa/Johannesburg',
-      venue: {
-        name: 'The Amphitheatre Pavilion',
-        address: '10 Dock Road, Waterfront',
-        city: 'Cape Town',
-        country: 'South Africa',
-      },
-      organizer: {
-        id: currentOrg.id,
-        name: currentOrg.name,
-        verified: true,
-        rating: 5.0,
-      },
-      tickets: [
-        {
-          id: 'tier-smp-1',
-          eventId: '',
-          name: 'Day 1 Conference Pass',
-          description: 'Keynotes & live panel access',
-          priceMinor: 25000,
-          currency: 'ZAR',
-          capacity: 400,
-          remaining: 380,
-          minPerOrder: 1,
-          maxPerOrder: 4,
-          salesStart: new Date().toISOString(),
-          salesEnd: '2026-11-25T12:00:00Z',
-          status: 'active',
-        },
-        {
-          id: 'tier-smp-2',
-          eventId: '',
-          name: 'VIP All-Access Badge',
-          description: 'Plenary keynote, VIP lounge & backstage artist pass',
-          priceMinor: 85000,
-          currency: 'ZAR',
-          capacity: 100,
-          remaining: 74,
-          minPerOrder: 1,
-          maxPerOrder: 2,
-          salesStart: new Date().toISOString(),
-          salesEnd: '2026-11-25T12:00:00Z',
-          status: 'active',
-        }
-      ],
-      status: 'published',
-      featured: true,
-      refundPolicy: 'Full refund available up to 7 days before event opening.',
-      tags: ['Music', 'Pan-African', 'Cape Town'],
-      currency: 'ZAR',
-    });
-    onEventCreated(sampleEvent);
-    setOrganizers([...store.getOrganizers()]);
-    playAudioFeedback('success');
-    showNotification('Sample Event created & published to portfolio!');
-  };
-
-  const handleRegisterSampleAttendee = () => {
-    const evt = allEvents[0] || store.getEvents()[0];
-    if (evt) {
-      const tkt = store.createSampleAttendee(evt.id);
-      setOrganizers([...store.getOrganizers()]);
-      playAudioFeedback('success');
-      showNotification(`Sample attendee ${tkt.attendeeName} registered (${tkt.ticketCode})!`);
-    }
-  };
-
   const handleManualAttendeeRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    const evt = allEvents.find(ev => ev.id === newAttendeeEventId) || allEvents[0] || store.getEvents()[0];
+    const evt = allEvents.find(ev => ev.id === newAttendeeEventId) || allEvents[0];
+    if (!evt || evt.tickets.length === 0) {
+      showNotification('Create and publish an event with ticket tiers before issuing manual passes.');
+      return;
+    }
     const tier = evt.tickets.find(t => t.id === newAttendeeTierId) || evt.tickets[0];
-    
-    const ticketCode = `NX-${Math.floor(100000 + Math.random() * 900000)}-M`;
-    const token = 'token_' + Math.random().toString(36).substring(2, 10);
-
-    const ticket: Ticket = {
-      id: 'tkt-man-' + Date.now(),
-      ticketCode,
-      token,
-      orderId: 'ord-manual-' + Date.now(),
+    const res = store.createOrder({
       eventId: evt.id,
-      eventTitle: evt.title,
-      eventDate: evt.startDate,
-      eventVenue: `${evt.venue.name}, ${evt.venue.city}`,
-      tierId: tier.id,
-      tierName: tier.name,
-      attendeeName: newAttendeeName,
-      attendeeEmail: newAttendeeEmail,
-      attendeePhone: newAttendeePhone,
-      priceMinor: tier.priceMinor,
-      currency: tier.currency,
-      status: 'valid',
-      qrPayload: JSON.stringify({
-        code: ticketCode,
-        eventId: evt.id,
-        token,
-        tier: tier.name,
-        attendee: newAttendeeName,
-      }),
-    };
-
-    store.getTickets().unshift(ticket);
-    store.logActivity({
-      type: 'purchase',
-      title: 'Manual Guest Admittance Registered',
-      description: `${newAttendeeName} registered for ${evt.title} (${tier.name})`,
-      actor: 'Registration Desk',
+      customerName: newAttendeeName,
+      customerEmail: newAttendeeEmail,
+      customerPhone: newAttendeePhone,
+      items: [{ tierId: tier.id, quantity: 1 }],
     });
 
+    if (!res.success) {
+      playAudioFeedback('error');
+      showNotification(res.error || 'Unable to register guest.');
+      return;
+    }
+
     setShowAddAttendeeModal(false);
+    setNewAttendeeName('');
+    setNewAttendeeEmail('');
+    setNewAttendeePhone('');
     setOrganizers([...store.getOrganizers()]);
     playAudioFeedback('success');
     showNotification(`Attendee ${newAttendeeName} issued ticket pass!`);
@@ -565,15 +479,16 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
       title: campaignTitle,
       type: campaignType,
       audience: campaignAudience,
-      sentCount: 3500,
-      openRate: 42.5,
-      conversionRate: 6.8,
-      revenueGeneratedMinor: 2450000,
+      sentCount: allTickets.length,
+      openRate: 0,
+      conversionRate: 0,
+      revenueGeneratedMinor: 0,
       currency: 'ZAR',
       status: 'active',
       scheduledDate: new Date().toISOString().slice(0, 10),
     });
     setShowCampaignModal(false);
+    setCampaignTitle('');
     setOrganizers([...store.getOrganizers()]);
     playAudioFeedback('success');
     showNotification(`Marketing campaign "${campaignTitle}" launched!`);
@@ -582,14 +497,22 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
   const handleAddSession = (e: React.FormEvent) => {
     e.preventDefault();
     const targetEvtId = sessionEventId || allEvents[0]?.id;
+    if (!targetEvtId) {
+      showNotification('Create an event first before scheduling sessions.');
+      return;
+    }
     store.addAgendaSession(targetEvtId, {
       time: sessionTime,
       title: sessionTitle,
       speaker: sessionSpeaker,
       stage: sessionStage,
-      description: 'Comprehensive panel session on African market readiness and scaling infrastructure.',
+      description: 'Scheduled event session.',
     });
     setShowSessionModal(false);
+    setSessionTitle('');
+    setSessionTime('');
+    setSessionSpeaker('');
+    setSessionStage('');
     setOrganizers([...store.getOrganizers()]);
     playAudioFeedback('success');
     showNotification('Session scheduled into programme agenda!');
@@ -599,8 +522,13 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
     e.preventDefault();
     if (newPromoCode.trim()) {
       const code = newPromoCode.trim().toUpperCase();
-      store.applyPromoCode(code);
+      store.createPromoCode({
+        code,
+        discountPercentage: newPromoDiscount,
+        eventId: allEvents[0]?.id,
+      });
       setShowPromoModal(false);
+      setNewPromoCode('');
       showNotification(`Promo code "${code}" registered (${newPromoDiscount}% off)!`);
     }
   };
@@ -617,80 +545,60 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
     }, 1800);
   };
 
-  // CSV Export utility
+  // CSV Export utility (formula-injection hardened)
   const handleExportCSV = (type: 'attendees' | 'ledger' | 'logs' = 'attendees') => {
-    let filename = 'nexora_attendees.csv';
-    let csvContent = 'data:text/csv;charset=utf-8,';
-    
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    let filename = `nexora_attendees_${dateStamp}.csv`;
+
     if (type === 'attendees') {
-      filename = `nexora_attendees_${new Date().toISOString().slice(0, 10)}.csv`;
-      csvContent += 'Ticket Code,Attendee Name,Email,Phone,Event,Tier,Price,Currency,Status\n';
-      allTickets.forEach(t => {
-        csvContent += `"${t.ticketCode}","${t.attendeeName}","${t.attendeeEmail}","${t.attendeePhone}","${t.eventTitle}","${t.tierName}",${(t.priceMinor / 100).toFixed(2)},"${t.currency}","${t.status}"\n`;
-      });
+      downloadSafeCsv(
+        filename,
+        ['Ticket Code', 'Attendee Name', 'Email', 'Phone', 'Event', 'Tier', 'Price', 'Currency', 'Status'],
+        allTickets.map(t => [
+          t.ticketCode,
+          t.attendeeName,
+          t.attendeeEmail,
+          t.attendeePhone,
+          t.eventTitle,
+          t.tierName,
+          (t.priceMinor / 100).toFixed(2),
+          t.currency,
+          t.status,
+        ])
+      );
     } else if (type === 'ledger') {
-      filename = `nexora_settlement_ledger_${new Date().toISOString().slice(0, 10)}.csv`;
-      csvContent += 'ID,Timestamp,Type,Debit,Credit,Currency,Description\n';
-      ledgerEntries.forEach(l => {
-        csvContent += `"${l.id}","${l.timestamp}","${l.type}",${(l.debitMinor / 100).toFixed(2)},${(l.creditMinor / 100).toFixed(2)},"${l.currency}","${l.description}"\n`;
-      });
+      filename = `nexora_settlement_ledger_${dateStamp}.csv`;
+      downloadSafeCsv(
+        filename,
+        ['ID', 'Timestamp', 'Type', 'Debit', 'Credit', 'Currency', 'Description'],
+        ledgerEntries.map(l => [
+          l.id,
+          l.timestamp,
+          l.type,
+          (l.debitMinor / 100).toFixed(2),
+          (l.creditMinor / 100).toFixed(2),
+          l.currency,
+          l.description,
+        ])
+      );
     } else {
-      filename = `nexora_scanner_audit_${new Date().toISOString().slice(0, 10)}.csv`;
-      csvContent += 'ID,Ticket Code,Timestamp,Staff,Gate,Result,Message\n';
-      store.getCheckInLogs().forEach(log => {
-        csvContent += `"${log.id}","${log.ticketCode}","${log.timestamp}","${log.staffName}","${log.gate}","${log.result}","${log.message}"\n`;
-      });
+      filename = `nexora_scanner_audit_${dateStamp}.csv`;
+      downloadSafeCsv(
+        filename,
+        ['ID', 'Ticket Code', 'Timestamp', 'Staff', 'Gate', 'Result', 'Message'],
+        store.getCheckInLogs().map(log => [
+          log.id,
+          log.ticketCode,
+          log.timestamp,
+          log.staffName,
+          log.gate,
+          log.result,
+          log.message,
+        ])
+      );
     }
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
     showNotification(`Exported ${filename}`);
-  };
-
-  const handleSimulateLiveActivity = () => {
-    const types: Array<'purchase' | 'checkin' | 'refund' | 'campaign'> = ['purchase', 'checkin', 'refund', 'campaign'];
-    const selectedType = types[Math.floor(Math.random() * types.length)];
-    const names = ['Kofi Mensah', 'Nia Adeyemi', 'Thabo Sithole', 'Amina Diallo', 'Emeka Eze'];
-    const chosenName = names[Math.floor(Math.random() * names.length)];
-
-    if (selectedType === 'purchase') {
-      store.logActivity({
-        type: 'purchase',
-        title: 'New VIP Pass Reserved',
-        description: `${chosenName} purchased 2x VIP Passes for Cape Town Vibes`,
-        actor: chosenName,
-      });
-    } else if (selectedType === 'checkin') {
-      store.logActivity({
-        type: 'checkin',
-        title: 'Turnstile Admittance',
-        description: `${chosenName} admitted through Gate 2 North`,
-        actor: 'Turnstile A2',
-      });
-    } else if (selectedType === 'refund') {
-      store.logActivity({
-        type: 'refund',
-        title: 'Exchange Processed',
-        description: `Customer clearance refunded for ${chosenName}`,
-        actor: 'Finance Desk',
-      });
-    } else {
-      store.logActivity({
-        type: 'campaign',
-        title: 'SMS Reminder Blast Delivered',
-        description: `Dispatched gates & parking briefing to 1,200 attendees`,
-        actor: 'Nexora Automation',
-      });
-    }
-
-    setOrganizers([...store.getOrganizers()]);
-    playAudioFeedback('success');
-    showNotification('Simulated new live event activity.');
   };
 
   const handlePublishFromWizard = () => {
@@ -806,6 +714,41 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
     if (activityCategoryFilter !== 'all' && act.type !== activityCategoryFilter) return false;
     return true;
   });
+
+  if (!currentOrg) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center p-6 ${isDarkTheme ? 'bg-black text-white' : 'bg-[#F8F7F4] text-black'}`}>
+        <div className={`max-w-md w-full p-8 rounded-2xl border text-center space-y-4 ${isDarkTheme ? 'bg-[#111827] border-[#1F2937]' : 'bg-white border-[#E5E7EB]'}`}>
+          <Building2 className="w-10 h-10 mx-auto opacity-70" />
+          <h2 className="text-lg font-bold">Organizer Workspace Required</h2>
+          <p className="text-xs opacity-70">
+            Sign in or register an organizer account to publish events, track real-time ticket sales, and manage payouts.
+          </p>
+          <div className="flex items-center justify-center gap-3 pt-2">
+            {onOpenAuth && (
+              <button
+                onClick={() => onOpenAuth('signup')}
+                className="px-4 py-2 bg-white text-black font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Create Organizer Account
+              </button>
+            )}
+            <button
+              onClick={onBackToMarketplace}
+              className="px-4 py-2 border border-current/20 text-xs font-semibold rounded-xl cursor-pointer"
+            >
+              Back to Marketplace
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Real-time dashboard calculations
+  const checkedInCount = allTickets.filter(t => t.status === 'checked_in').length;
+  const checkInRatePct = allTickets.length > 0 ? ((checkedInCount / allTickets.length) * 100).toFixed(1) : '0.0';
+  const connectedIntegrationsCount = integrations.filter(i => i.status === 'connected').length;
 
   return (
     <div className={`min-h-screen flex ${isDarkTheme ? 'bg-black text-white' : 'bg-white text-black'}`}>
@@ -963,7 +906,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
               <div className="flex-1 flex items-center justify-between">
                 <span>6. Platform Integrations</span>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 rounded font-bold">
-                  Connected
+                  {connectedIntegrationsCount > 0 ? `${connectedIntegrationsCount} Active` : 'Setup'}
                 </span>
               </div>
             </button>
@@ -1196,11 +1139,11 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     <Users className={`w-4 h-4 ${isDarkTheme ? 'text-white' : 'text-neutral-900'}`} />
                   </div>
                   <div className="text-2xl font-extrabold font-mono">
-                    {allTickets.length + 1158}
+                    {allTickets.length}
                   </div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-semibold">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>+18.4% vs last cycle</span>
+                  <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280] font-semibold">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Live issued passes across {allEvents.length} events</span>
                   </div>
                 </div>
 
@@ -1212,11 +1155,11 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     <DollarSign className="w-4 h-4 text-emerald-500" />
                   </div>
                   <div className="text-2xl font-extrabold font-mono">
-                    {formatCurrency(orgBalance.grossMinor + 1250000, 'ZAR')}
+                    {formatCurrency(orgBalance.grossMinor, 'ZAR')}
                   </div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-semibold">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>+24.1% conversion velocity</span>
+                  <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280] font-semibold">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Real-time settled ticket ledger</span>
                   </div>
                 </div>
 
@@ -1228,10 +1171,10 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     <CheckCircle2 className="w-4 h-4 text-blue-500" />
                   </div>
                   <div className="text-2xl font-extrabold text-blue-500 font-mono">
-                    {allTickets.filter(t => t.status === 'checked_in').length + 412}
+                    {checkedInCount}
                   </div>
                   <span className="text-[11px] text-[#6B7280] block font-mono">
-                    Turnstile check-in rate: 38.2%
+                    Turnstile check-in rate: {checkInRatePct}%
                   </span>
                 </div>
 
@@ -1243,7 +1186,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     <CreditCard className={`w-4 h-4 ${isDarkTheme ? 'text-white' : 'text-neutral-900'}`} />
                   </div>
                   <div className="text-2xl font-extrabold text-emerald-500 font-mono">
-                    {formatCurrency(orgBalance.availablePayoutMinor + 450000, 'ZAR')}
+                    {formatCurrency(orgBalance.availablePayoutMinor, 'ZAR')}
                   </div>
                   <span className="text-[11px] text-[#6B7280] block font-mono">
                     Net proceeds ready for payout
@@ -1365,36 +1308,45 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                   </div>
                 </div>
 
-                {/* SVG Visual Performance Bar Chart */}
+                {/* Real-Time Performance Bar Chart */}
                 <div className="h-56 w-full flex items-end gap-2 pt-4 pb-2 px-2 border-b border-[#E5E7EB]/10">
-                  {[
-                    { label: 'Day 1', val: 35, revenue: 'R 12k', reg: '35 reg' },
-                    { label: 'Day 3', val: 52, revenue: 'R 21k', reg: '52 reg' },
-                    { label: 'Day 6', val: 45, revenue: 'R 18k', reg: '45 reg' },
-                    { label: 'Day 9', val: 78, revenue: 'R 34k', reg: '78 reg' },
-                    { label: 'Day 12', val: 62, revenue: 'R 28k', reg: '62 reg' },
-                    { label: 'Day 15', val: 94, revenue: 'R 46k', reg: '94 reg' },
-                    { label: 'Day 18', val: 82, revenue: 'R 39k', reg: '82 reg' },
-                    { label: 'Day 21', val: 110, revenue: 'R 58k', reg: '110 reg' },
-                    { label: 'Day 24', val: 98, revenue: 'R 49k', reg: '98 reg' },
-                    { label: 'Day 27', val: 135, revenue: 'R 72k', reg: '135 reg' },
-                    { label: 'Today', val: 160, revenue: 'R 89k', reg: '160 reg' },
-                  ].map((bar, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
-                      <div className={`opacity-0 group-hover:opacity-100 transition-opacity text-[10px] font-mono font-bold ${
-                        isDarkTheme ? 'text-white' : 'text-neutral-900'
-                      }`}>
-                        {chartMetric === 'revenue' ? bar.revenue : bar.reg}
+                  {(() => {
+                    if (allEvents.length === 0 && allTickets.length === 0) {
+                      return (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-center text-xs text-[#9CA3AF] font-mono space-y-2">
+                          <BarChart3 className="w-8 h-8 opacity-40" />
+                          <span>No registration or settlement activity recorded yet. Publish an event to track real-time momentum.</span>
+                        </div>
+                      );
+                    }
+                    const eventBars = allEvents.slice(0, 10).map((ev, idx) => {
+                      const evTickets = allTickets.filter(t => t.eventId === ev.id);
+                      const evRevenueMinor = evTickets.reduce((s, t) => s + t.priceMinor, 0);
+                      return {
+                        label: ev.title.split(' ')[0] || `Evt ${idx + 1}`,
+                        val: chartMetric === 'revenue' ? evRevenueMinor : evTickets.length,
+                        revenue: formatCurrency(evRevenueMinor, ev.currency),
+                        reg: `${evTickets.length} reg`,
+                      };
+                    });
+                    const maxVal = Math.max(1, ...eventBars.map(b => b.val));
+                    return eventBars.map((bar, i) => (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1 group">
+                        <div className={`opacity-0 group-hover:opacity-100 transition-opacity text-[10px] font-mono font-bold ${
+                          isDarkTheme ? 'text-white' : 'text-neutral-900'
+                        }`}>
+                          {chartMetric === 'revenue' ? bar.revenue : bar.reg}
+                        </div>
+                        <div
+                          className={`w-full rounded-t-md transition-all duration-300 group-hover:opacity-80 ${
+                            isDarkTheme ? 'bg-[#374151]' : 'bg-[#1F2937]'
+                          }`}
+                          style={{ height: `${Math.max(6, (bar.val / maxVal) * 160)}px` }}
+                        />
+                        <span className="text-[10px] text-[#9CA3AF] font-mono pt-1 truncate max-w-[80px]">{bar.label}</span>
                       </div>
-                      <div
-                        className={`w-full rounded-t-md transition-all duration-300 group-hover:opacity-80 ${
-                          isDarkTheme ? 'bg-[#374151]' : 'bg-[#1F2937]'
-                        }`}
-                        style={{ height: `${(bar.val / 160) * 160}px` }}
-                      />
-                      <span className="text-[10px] text-[#9CA3AF] font-mono pt-1">{bar.label}</span>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
 
@@ -1458,48 +1410,45 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                   <div className="flex items-center justify-between border-b border-[#E5E7EB]/10 pb-3">
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-bold">Real-Time Event Activity Stream</h3>
-                      <button
-                        onClick={handleSimulateLiveActivity}
-                        className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-colors cursor-pointer ${
-                          isDarkTheme ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-neutral-900 hover:bg-black text-white'
-                        }`}
-                        title="Simulate incoming ticket sale or check-in"
-                      >
-                        + Simulate Event
-                      </button>
                     </div>
                     <Clock className="w-4 h-4 text-[#9CA3AF]" />
                   </div>
 
                   <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-                    {filteredActivity.map(act => (
-                      <div
-                        key={act.id}
-                        className={`p-3 rounded-xl border flex items-start gap-3 text-xs ${
-                          isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'
-                        }`}
-                      >
-                        <div className={`p-2 rounded-lg border shrink-0 ${
-                          isDarkTheme ? 'bg-[#111827] border-[#374151]' : 'bg-white border-[#E5E7EB]'
-                        }`}>
-                          {act.type === 'purchase' && <DollarSign className="w-3.5 h-3.5 text-emerald-500" />}
-                          {act.type === 'checkin' && <CheckCircle2 className="w-3.5 h-3.5 text-blue-500" />}
-                          {act.type === 'refund' && <RotateCcw className="w-3.5 h-3.5 text-red-500" />}
-                          {act.type === 'campaign' && <Megaphone className="w-3.5 h-3.5 text-purple-500" />}
-                          {act.type === 'rfp' && <Building2 className="w-3.5 h-3.5 text-amber-500" />}
-                          {act.type === 'session' && <Calendar className="w-3.5 h-3.5 text-indigo-500" />}
-                        </div>
-                        <div className="flex-1 space-y-0.5">
-                          <div className="flex justify-between items-center">
-                            <span className="font-bold">{act.title}</span>
-                            <span className="text-[10px] text-[#9CA3AF] font-mono">
-                              {new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <p className={isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}>{act.description}</p>
-                        </div>
+                    {filteredActivity.length === 0 ? (
+                      <div className="p-6 text-center text-xs font-mono text-[#9CA3AF] border border-dashed border-[#374151]/50 rounded-xl">
+                        No event activity recorded yet. Ticket sales, check-ins, and updates appear here in real time.
                       </div>
-                    ))}
+                    ) : (
+                      filteredActivity.map(act => (
+                        <div
+                          key={act.id}
+                          className={`p-3 rounded-xl border flex items-start gap-3 text-xs ${
+                            isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'
+                          }`}
+                        >
+                          <div className={`p-2 rounded-lg border shrink-0 ${
+                            isDarkTheme ? 'bg-[#111827] border-[#374151]' : 'bg-white border-[#E5E7EB]'
+                          }`}>
+                            {act.type === 'purchase' && <DollarSign className="w-3.5 h-3.5 text-emerald-500" />}
+                            {act.type === 'checkin' && <CheckCircle2 className="w-3.5 h-3.5 text-blue-500" />}
+                            {act.type === 'refund' && <RotateCcw className="w-3.5 h-3.5 text-red-500" />}
+                            {act.type === 'campaign' && <Megaphone className="w-3.5 h-3.5 text-purple-500" />}
+                            {act.type === 'rfp' && <Building2 className="w-3.5 h-3.5 text-amber-500" />}
+                            {act.type === 'session' && <Calendar className="w-3.5 h-3.5 text-indigo-500" />}
+                          </div>
+                          <div className="flex-1 space-y-0.5">
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold">{act.title}</span>
+                              <span className="text-[10px] text-[#9CA3AF] font-mono">
+                                {new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <p className={isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}>{act.description}</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -1722,45 +1671,47 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
           {activeSection === 'attendees' && (
             <div className="space-y-6 animate-fade-in">
               
-              {/* Registration Conversion Funnel */}
+              {/* Registration & Capacity Summary */}
               <div className={`p-6 rounded-2xl border shadow-xs space-y-4 ${
                 isDarkTheme ? 'bg-[#111827] border-[#1F2937]' : 'bg-white border-[#E5E7EB]'
               }`}>
                 <div className="flex justify-between items-center">
-                  <h3 className="text-sm font-bold">Registration Conversion Funnel</h3>
-                  <span className="text-xs text-emerald-500 font-semibold font-mono">Overall Conversion: 7.4%</span>
+                  <h3 className="text-sm font-bold">Real-Time Registration Summary</h3>
+                  <span className="text-xs text-emerald-500 font-semibold font-mono">
+                    Check-In Rate: {checkInRatePct}%
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                   <div className={`p-3 rounded-xl border space-y-1 ${
                     isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'
                   }`}>
-                    <span className="text-[#6B7280] block">1. Discovery Impressions</span>
-                    <strong className="text-base font-extrabold font-mono">24,500</strong>
-                    <span className="text-[10px] text-gray-400 block">100% Top of Funnel</span>
+                    <span className="text-[#6B7280] block">1. Published Events</span>
+                    <strong className="text-base font-extrabold font-mono">{allEvents.length}</strong>
+                    <span className="text-[10px] text-gray-400 block">Active portfolio</span>
                   </div>
                   <div className={`p-3 rounded-xl border space-y-1 ${
                     isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'
                   }`}>
-                    <span className="text-[#6B7280] block">2. Event Page Views</span>
-                    <strong className="text-base font-extrabold font-mono">8,120</strong>
-                    <span className="text-[10px] text-emerald-500 block">33.1% Page Engagement</span>
+                    <span className="text-[#6B7280] block">2. Paid Registrations</span>
+                    <strong className="text-base font-extrabold font-mono">{allTickets.length}</strong>
+                    <span className="text-[10px] text-emerald-500 block">Issued passes</span>
                   </div>
                   <div className={`p-3 rounded-xl border space-y-1 ${
                     isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'
                   }`}>
-                    <span className="text-[#6B7280] block">3. Checkout Starts</span>
-                    <strong className="text-base font-extrabold font-mono">2,490</strong>
-                    <span className="text-[10px] text-emerald-500 block">30.6% Ticket Selection</span>
+                    <span className="text-[#6B7280] block">3. Checked-In Guests</span>
+                    <strong className="text-base font-extrabold font-mono">{checkedInCount}</strong>
+                    <span className="text-[10px] text-emerald-500 block">{checkInRatePct}% attendance</span>
                   </div>
                   <div className={`p-3 rounded-xl border space-y-1 ${
                     isDarkTheme ? 'bg-emerald-950/20 border-emerald-900/50' : 'bg-emerald-50 border-emerald-200'
                   }`}>
-                    <span className="text-emerald-500 block">4. Paid Registrations</span>
+                    <span className="text-emerald-500 block">4. Refunds / Revoked</span>
                     <strong className="text-base font-extrabold text-emerald-500 font-mono">
-                      {allTickets.length + 1820}
+                      {allTickets.filter(t => t.status === 'refunded').length}
                     </strong>
-                    <span className="text-[10px] text-emerald-600 block">73.1% Payment Success</span>
+                    <span className="text-[10px] text-emerald-600 block">Real-time ledger count</span>
                   </div>
                 </div>
               </div>
@@ -2160,27 +2111,39 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     </div>
 
                     {/* Virtual Smartphone Card */}
-                    <div className="bg-[#111827] text-white p-5 rounded-2xl border-2 border-[#374151] space-y-4 shadow-xl">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-bold text-white font-mono">NEXORA PASS</span>
-                        <span className="bg-emerald-500/20 text-emerald-400 font-mono text-[10px] px-2 py-0.5 rounded font-bold">VIP ACCESS</span>
-                      </div>
+                    {allTickets[0] ? (
+                      <div className="bg-[#111827] text-white p-5 rounded-2xl border-2 border-[#374151] space-y-4 shadow-xl">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-bold text-white font-mono">NEXORA PASS</span>
+                          <span className="bg-emerald-500/20 text-emerald-400 font-mono text-[10px] px-2 py-0.5 rounded font-bold uppercase">
+                            {allTickets[0].tierName}
+                          </span>
+                        </div>
 
-                      <div className="space-y-1">
-                        <h3 className="text-lg font-extrabold">{allEvents[0]?.title}</h3>
-                        <p className="text-xs text-[#9CA3AF]">{allEvents[0]?.venue.name}, {allEvents[0]?.venue.city}</p>
-                      </div>
+                        <div className="space-y-1">
+                          <h3 className="text-lg font-extrabold">{allTickets[0].eventTitle}</h3>
+                          <p className="text-xs text-[#9CA3AF]">{allTickets[0].eventVenue}</p>
+                        </div>
 
-                      <div className="bg-white p-4 rounded-xl flex flex-col items-center justify-center text-[#111827] space-y-2">
-                        <QrCode className="w-28 h-28 text-[#111827]" />
-                        <span className="font-mono text-xs font-bold tracking-wider">NX-TKT-84920-VIP</span>
-                        <span className="text-[10px] text-gray-500">Scan at any official turnstile gate</span>
-                      </div>
+                        <div className="bg-white p-4 rounded-xl flex flex-col items-center justify-center text-[#111827] space-y-2">
+                          <QrCode className="w-28 h-28 text-[#111827]" />
+                          <span className="font-mono text-xs font-bold tracking-wider">{allTickets[0].ticketCode}</span>
+                          <span className="text-[10px] text-gray-500">Scan at any official turnstile gate</span>
+                        </div>
 
-                      <div className="text-xs text-center text-[#9CA3AF]">
-                        Passholder: <strong className="text-white">Amina Mohamed (Managing Partner)</strong>
+                        <div className="text-xs text-center text-[#9CA3AF]">
+                          Passholder: <strong className="text-white">{allTickets[0].attendeeName}</strong>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="bg-[#111827] text-white p-6 rounded-2xl border-2 border-dashed border-[#374151] text-center space-y-2">
+                        <QrCode className="w-10 h-10 mx-auto opacity-40" />
+                        <p className="text-xs font-bold">No passes issued yet</p>
+                        <p className="text-[11px] text-[#9CA3AF]">
+                          Live attendee passes will preview here as soon as attendees complete ticket purchases.
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Interactive Live Poll & Q&A Simulation */}
@@ -2379,16 +2342,16 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
 
                     <div className="grid grid-cols-3 gap-2 text-center text-xs">
                       <div className={`p-3 rounded-xl border ${isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'}`}>
-                        <span className="text-[#6B7280] block text-[10px]">Gate 1 (Main)</span>
-                        <strong className="text-base font-mono">248</strong>
+                        <span className="text-[#6B7280] block text-[10px]">Total Scans</span>
+                        <strong className="text-base font-mono">{checkInLogs.length}</strong>
                       </div>
                       <div className={`p-3 rounded-xl border ${isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'}`}>
-                        <span className="text-[#6B7280] block text-[10px]">Gate 2 (VIP)</span>
-                        <strong className="text-base font-mono">94</strong>
+                        <span className="text-[#6B7280] block text-[10px]">Verified Entries</span>
+                        <strong className="text-base font-mono text-emerald-400">{checkInLogs.filter(l => l.result === 'valid').length}</strong>
                       </div>
                       <div className={`p-3 rounded-xl border ${isDarkTheme ? 'bg-[#1F2937] border-[#374151]' : 'bg-[#F8F7F4] border-[#E5E7EB]'}`}>
-                        <span className="text-[#6B7280] block text-[10px]">Gate 3 (Staff)</span>
-                        <strong className="text-base font-mono">70</strong>
+                        <span className="text-[#6B7280] block text-[10px]">Duplicate / Flagged</span>
+                        <strong className="text-base font-mono text-amber-400">{checkInLogs.filter(l => l.result !== 'valid').length}</strong>
                       </div>
                     </div>
 
@@ -2586,20 +2549,20 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-xs">{item.name}</span>
-                            <span className="text-[10px] text-[#9CA3AF] uppercase font-mono">{item.category}</span>
+                            <span className="text-[10px] text-[#9CA3AF] uppercase font-mono">{item.categoryLabel}</span>
                           </div>
-                          <p className={`text-xs ${isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}`}>{item.desc}</p>
+                          <p className={`text-xs ${isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}`}>{item.description}</p>
                         </div>
 
                         <button
                           onClick={() => toggleIntegration(item.id)}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
-                            item.status
+                            item.status === 'connected'
                               ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                               : 'bg-gray-300 text-gray-700 hover:bg-gray-400 dark:bg-gray-700 dark:text-gray-300'
                           }`}
                         >
-                          {item.status ? 'Connected' : 'Connect'}
+                          {item.status === 'connected' ? 'Connected' : 'Connect'}
                         </button>
                       </div>
                     ))}

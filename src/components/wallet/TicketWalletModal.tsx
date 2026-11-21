@@ -38,8 +38,6 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
   onRefresh,
   onExploreEvents,
 }) => {
-  if (!isOpen) return null;
-
   const [qrCodeUrls, setQrCodeUrls] = useState<Record<string, string>>({});
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(tickets[0] || null);
   
@@ -47,7 +45,7 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
   const [transferModalTicket, setTransferModalTicket] = useState<Ticket | null>(null);
   const [transferName, setTransferName] = useState('');
   const [transferEmail, setTransferEmail] = useState('');
-  const [transferError, setTransferError] = useState('');
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   // Refund state
   const [refundModalTicket, setRefundModalTicket] = useState<Ticket | null>(null);
@@ -55,9 +53,10 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
   const [refundCustomNote, setRefundCustomNote] = useState('');
   const [refundFeedback, setRefundFeedback] = useState<{ success: boolean; msg: string } | null>(null);
 
-  // Search / Recover booking filter
+  // Search / Recover booking filter & notifications
   const [searchRef, setSearchRef] = useState('');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [walletNotice, setWalletNotice] = useState<string | null>(null);
 
   useEffect(() => {
     async function genQRs() {
@@ -81,6 +80,15 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
     }
   }, [tickets]);
 
+  if (!isOpen) return null;
+
+  const showWalletNotice = (msg: string) => {
+    setWalletNotice(msg);
+    setTimeout(() => {
+      setWalletNotice(prev => (prev === msg ? null : prev));
+    }, 3500);
+  };
+
   const handleCopyCode = (code: string) => {
     navigator.clipboard?.writeText(code);
     setCopiedCode(code);
@@ -92,15 +100,19 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
   };
 
   const handleExecuteTransfer = () => {
-    if (!transferModalTicket || !transferName.trim() || !transferEmail.trim()) return;
-    setTransferError('');
-    if (!store.updateTicketAttendee(transferModalTicket.id, transferName.trim(), transferEmail.trim(), transferModalTicket.attendeePhone)) {
-      setTransferError('Could not save the transfer. Please try again.');
+    if (!transferModalTicket) return;
+    setTransferError(null);
+    const res = store.transferTicket(transferModalTicket.id, transferName, transferEmail);
+    if (!res.success || !res.ticket) {
+      setTransferError(res.error || 'Failed to transfer ticket pass.');
       return;
     }
+
+    setSelectedTicket(res.ticket);
     setTransferModalTicket(null);
     setTransferName('');
     setTransferEmail('');
+    showWalletNotice(`Ticket ${res.ticket.ticketCode} transferred to ${res.ticket.attendeeName} with rotated QR credentials.`);
     onRefresh();
   };
 
@@ -182,6 +194,19 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
               placeholder="Search by ticket code (e.g. NX-TKT-94821) or attendee name..."
               className="w-full bg-transparent text-xs text-[#111827] focus:outline-none placeholder-[#9CA3AF]"
             />
+          </div>
+        )}
+
+        {/* Inline Notification Banner */}
+        {walletNotice && (
+          <div className="px-6 py-2.5 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs font-medium flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{walletNotice}</span>
+            </div>
+            <button onClick={() => setWalletNotice(null)} className="text-emerald-700 hover:text-emerald-900 cursor-pointer">
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 
@@ -385,16 +410,20 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
                         <button
                           type="button"
                           onClick={() => {
+                            const safeTitle = selectedTicket.eventTitle.replace(/[\r\n]/g, ' ');
+                            const safeVenue = selectedTicket.eventVenue.replace(/[\r\n]/g, ' ');
                             const startIso = new Date(selectedTicket.eventDate).toISOString().replace(/-|:|\.\d\d\d/g, '');
                             const endIso = new Date(new Date(selectedTicket.eventDate).getTime() + 4 * 3600000).toISOString().replace(/-|:|\.\d\d\d/g, '');
-                            const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NEXORA//Events//EN\r\nBEGIN:VEVENT\r\nUID:${selectedTicket.id}@nexora.events\r\nDTSTAMP:${startIso}\r\nDTSTART:${startIso}\r\nDTEND:${endIso}\r\nSUMMARY:${selectedTicket.eventTitle}\r\nDESCRIPTION:Gate Pass: ${selectedTicket.ticketCode}\r\nLOCATION:${selectedTicket.eventVenue}\r\nEND:VEVENT\r\nEND:VCALENDAR`;
+                            const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//NEXORA//Events//EN\r\nBEGIN:VEVENT\r\nUID:${selectedTicket.id}@nexora.events\r\nDTSTAMP:${startIso}\r\nDTSTART:${startIso}\r\nDTEND:${endIso}\r\nSUMMARY:${safeTitle}\r\nDESCRIPTION:Gate Pass: ${selectedTicket.ticketCode}\r\nLOCATION:${safeVenue}\r\nEND:VEVENT\r\nEND:VCALENDAR`;
                             const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+                            const objUrl = window.URL.createObjectURL(blob);
                             const link = document.createElement('a');
-                            link.href = window.URL.createObjectURL(blob);
+                            link.href = objUrl;
                             link.download = `pass-${selectedTicket.ticketCode}.ics`;
                             document.body.appendChild(link);
                             link.click();
                             document.body.removeChild(link);
+                            setTimeout(() => window.URL.revokeObjectURL(objUrl), 1000);
                           }}
                           className="px-2 py-1 bg-[#1F2937] hover:bg-[#374151] text-xs text-white rounded-md border border-[#374151] flex items-center gap-1 transition-colors cursor-pointer"
                         >
@@ -408,7 +437,7 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
                         onClick={() => {
                           const refLink = `${window.location.origin}?event=${selectedTicket.eventId}&ref=REF-${selectedTicket.ticketCode.slice(-4)}`;
                           navigator.clipboard?.writeText(refLink);
-                          alert('Your referral link was copied! Friends get 10% off & you get 150 points.');
+                          showWalletNotice('Referral link copied! Friends receive 10% off and you earn 150 loyalty points.');
                         }}
                         className="px-2.5 py-1 bg-[#D7B779]/20 hover:bg-[#D7B779]/30 text-[#D7B779] text-xs font-semibold rounded-md border border-[#D7B779]/40 flex items-center gap-1 transition-colors cursor-pointer"
                       >
@@ -423,7 +452,6 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
                         <>
                           <button
                             onClick={() => {
-                              setTransferError('');
                               setTransferModalTicket(selectedTicket);
                               setTransferName(selectedTicket.attendeeName);
                               setTransferEmail(selectedTicket.attendeeEmail);
@@ -577,12 +605,16 @@ export const TicketWalletModal: React.FC<TicketWalletModalProps> = ({
                     placeholder="new.email@example.com"
                   />
                 </div>
+                {transferError && (
+                  <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">
+                    {transferError}
+                  </div>
+                )}
               </div>
 
-              {transferError && <p role="alert" className="text-xs text-red-600">{transferError}</p>}
-                <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2">
                 <button
-                  onClick={() => setTransferModalTicket(null)}
+                  onClick={() => { setTransferModalTicket(null); setTransferError(null); }}
                   className="px-3 py-2 text-xs text-[#4B5563] hover:bg-[#F8F7F4] rounded-lg"
                 >
                   Cancel

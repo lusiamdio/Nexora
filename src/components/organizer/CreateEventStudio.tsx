@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { Event, TicketTier, EventCategory, EventFormat, AgendaItem, Performer } from '../../types';
 import { store } from '../../lib/store';
+import { generateUniqueId } from '../../lib/security';
 
 import heroFestivalImg from '../../assets/images/hero_afro_festival_1791591623547.jpg';
 import techSummitImg from '../../assets/images/event_tech_summit_1791591635169.jpg';
@@ -87,7 +88,7 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
   duplicateFromEventId,
 }) => {
   const isDark = true; // High contrast dark studio
-  const existingEvents = useMemo(() => store.getEvents(), []);
+  const existingEvents = useMemo(() => store.getPlatformEvents(), []);
   const existingOrganizers = useMemo(() => store.getOrganizers(), []);
 
   // Active Stage
@@ -105,9 +106,7 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
 
   // Stage 01: Creation Method
   const [creationMethod, setCreationMethod] = useState<'blank' | 'generator' | 'template' | 'duplicate' | 'import'>('blank');
-  const [generatorPrompt, setGeneratorPrompt] = useState(
-    'Create a two-day African technology summit in Johannesburg for 500 attendees, with early-bird, general admission and VIP tickets, five speakers, a networking session and mobile-money payment options.'
-  );
+  const [generatorPrompt, setGeneratorPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Stage 02: Event Identity & Basics
@@ -115,77 +114,31 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
   const [shortSummary, setShortSummary] = useState('');
   const [category, setCategory] = useState<EventCategory>('Tech & Innovation');
   const [format, setFormat] = useState<EventFormat>('in_person');
-  const [venueName, setVenueName] = useState('Sandton Convention Centre');
-  const [venueAddress, setVenueAddress] = useState('161 Maude Street, Sandton');
-  const [venueCity, setVenueCity] = useState('Johannesburg');
+  const [venueName, setVenueName] = useState('');
+  const [venueAddress, setVenueAddress] = useState('');
+  const [venueCity, setVenueCity] = useState('');
   const [venueCountry, setVenueCountry] = useState('South Africa');
   const [virtualUrl, setVirtualUrl] = useState('');
-  const [startDate, setStartDate] = useState('2026-11-15T09:00');
-  const [endDate, setEndDate] = useState('2026-11-16T18:00');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [timezone, setTimezone] = useState('Africa/Johannesburg (GMT+2)');
   const [visibility, setVisibility] = useState<'public' | 'unlisted' | 'private' | 'invitation'>('public');
-  const [selectedOrganizerId, setSelectedOrganizerId] = useState(existingOrganizers[0]?.id || 'org-nexora');
-  const [capacityCap, setCapacityCap] = useState(500);
+  const currentUser = store.getCurrentUser();
+  const [selectedOrganizerId, setSelectedOrganizerId] = useState(
+    currentUser?.organizationId || existingOrganizers[0]?.id || 'org-' + Date.now().toString(36)
+  );
+  const [capacityCap, setCapacityCap] = useState(100);
   const [ageRestriction, setAgeRestriction] = useState('All Ages');
   const [slug, setSlug] = useState('');
 
   // Stage 03: Programme, Agenda & Content
-  const [description, setDescription] = useState(
-    'Join Africa’s premier founders, investors, and ecosystem builders for two transformative days of keynotes, intimate masterclasses, venture roundtables, and high-impact networking.'
-  );
-  const [agenda, setAgenda] = useState<AgendaItem[]>([
-    {
-      id: 'ag-1',
-      time: '09:00 - 10:15 AM',
-      title: 'Opening Keynote: The Pan-African Sovereign Tech Infrastructure',
-      description: 'Examining cross-border payment rails, digital identity, and regional cloud sovereignty.',
-      speaker: 'Dr. Kwame Mensah',
-      stage: 'Main Plenary Hall',
-      track: 'Infrastructure',
-    },
-    {
-      id: 'ag-2',
-      time: '11:00 - 12:30 PM',
-      title: 'Founder Roundtable: Scaling to Series B Across Emerging Markets',
-      description: 'Navigating currency fluctuation, regulatory compliance, and multi-country hiring.',
-      speaker: 'Amina Al-Mansoor',
-      stage: 'Innovation Stage B',
-      track: 'Venture',
-    },
-    {
-      id: 'ag-3',
-      time: '02:00 - 03:30 PM',
-      title: 'Fintech Masterclass: Real-Time Payment Routing & Fraud Prevention',
-      description: 'Architecture and settlement patterns across mobile money and instant EFT.',
-      speaker: 'Sipho Dlamini',
-      stage: 'Technical Workshop Room',
-      track: 'Fintech',
-    },
-  ]);
-  const [speakers, setSpeakers] = useState<Performer[]>([
-    { name: 'Dr. Kwame Mensah', role: 'Partner & Chief Architect, Pan-African Labs' },
-    { name: 'Amina Al-Mansoor', role: 'Founder & CEO, Serengeti Data Networks' },
-    { name: 'Sipho Dlamini', role: 'Head of Settlement Infrastructure, Nexora Financial' },
-  ]);
-  const [sponsors, setSponsors] = useState<{ id: string; name: string; tier: string; logo?: string; url?: string }[]>([
-    { id: 'sp-1', name: 'Standard Bank Group', tier: 'Headline Partner' },
-    { id: 'sp-2', name: 'Google for Startups Africa', tier: 'Ecosystem Partner' },
-    { id: 'sp-3', name: 'AWS Cloud Africa', tier: 'Technology Partner' },
-  ]);
-  const [faqs, setFaqs] = useState<{ id: string; question: string; answer: string }[]>([
-    {
-      id: 'faq-1',
-      question: 'Will sessions be recorded for virtual pass holders?',
-      answer: 'Yes, all keynote sessions and masterclasses will be available on-demand within 24 hours of streaming.',
-    },
-    {
-      id: 'faq-2',
-      question: 'What is the refund and ticket transfer policy?',
-      answer: 'Tickets are fully transferable up to 48 hours prior to start. Full refunds are eligible up to 14 days before the event.',
-    },
-  ]);
+  const [description, setDescription] = useState('');
+  const [agenda, setAgenda] = useState<AgendaItem[]>([]);
+  const [speakers, setSpeakers] = useState<Performer[]>([]);
+  const [sponsors, setSponsors] = useState<{ id: string; name: string; tier: string; logo?: string; url?: string }[]>([]);
+  const [faqs, setFaqs] = useState<{ id: string; question: string; answer: string }[]>([]);
   const [refundPolicy, setRefundPolicy] = useState(
-    'Full refunds are granted up to 14 days before the event. Within 14 days, passes can be transferred to another attendee or credited toward future editions.'
+    'Full refunds are granted up to 14 days before the event. Within 14 days, passes can be transferred to another attendee.'
   );
 
   // Stage 04: Visual Page Builder (Cover, Company Logo, Event Banner)
@@ -201,85 +154,43 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
     {
       id: 'tier-1',
       eventId: 'draft',
-      name: 'Early Bird Pass',
-      description: 'Full two-day conference access, keynote recordings, and welcome networking reception.',
-      priceMinor: 45000, // R 450.00
-      currency: 'ZAR',
-      capacity: 150,
-      remaining: 150,
-      minPerOrder: 1,
-      maxPerOrder: 4,
-      salesStart: '2026-10-01T00:00',
-      salesEnd: '2026-10-31T23:59',
-      status: 'active',
-    },
-    {
-      id: 'tier-2',
-      eventId: 'draft',
       name: 'General Admission',
-      description: 'Standard access to all tracks, exhibition floor, workshops, and attendee directory.',
-      priceMinor: 75000, // R 750.00
-      currency: 'ZAR',
-      capacity: 250,
-      remaining: 250,
-      minPerOrder: 1,
-      maxPerOrder: 8,
-      salesStart: '2026-10-15T00:00',
-      salesEnd: '2026-11-15T08:00',
-      status: 'active',
-    },
-    {
-      id: 'tier-3',
-      eventId: 'draft',
-      name: 'VIP Executive & Investor Pass',
-      description: 'VIP lounge access, reserved keynote front seating, private speaker dinner, and concierge check-in.',
-      priceMinor: 180000, // R 1,800.00
+      description: 'Standard event pass access.',
+      priceMinor: 25000,
       currency: 'ZAR',
       capacity: 100,
       remaining: 100,
       minPerOrder: 1,
-      maxPerOrder: 4,
-      salesStart: '2026-10-01T00:00',
-      salesEnd: '2026-11-15T08:00',
+      maxPerOrder: 6,
+      salesStart: '',
+      salesEnd: '',
       status: 'active',
     },
   ]);
-  const [addOns, setAddOns] = useState<{ id: string; name: string; priceMinor: number; description: string }[]>([
-    { id: 'ao-1', name: 'Reserved On-Site Parking Pass (2-Day)', priceMinor: 15000, description: 'Secure underground parking bay at Sandton Convention Centre' },
-    { id: 'ao-2', name: 'Networking Gala Dinner Voucher', priceMinor: 60000, description: 'Exclusive 3-course dinner with speakers and sponsors' },
-  ]);
-  const [promoCodes, setPromoCodes] = useState<{ code: string; discountPct: number; maxUses: number }[]>([
-    { code: 'EARLYVIP20', discountPct: 20, maxUses: 50 },
-    { code: 'STUDENT50', discountPct: 50, maxUses: 30 },
-  ]);
+  const [addOns, setAddOns] = useState<{ id: string; name: string; priceMinor: number; description: string }[]>([]);
+  const [promoCodes, setPromoCodes] = useState<{ code: string; discountPct: number; maxUses: number }[]>([]);
 
   // Stage 06: Attendee Experience
   const [customQuestions, setCustomQuestions] = useState<
     { id: string; label: string; type: 'text' | 'dropdown' | 'checkbox'; required: boolean; options?: string[] }[]
-  >([
-    { id: 'q-1', label: 'Organization / Company Name', type: 'text', required: true },
-    { id: 'q-2', label: 'Primary Industry Track', type: 'dropdown', required: true, options: ['Fintech & Payments', 'Venture & Growth', 'Cloud & AI Infrastructure', 'Policy & Trade'] },
-    { id: 'q-3', label: 'Dietary Preferences', type: 'dropdown', required: false, options: ['Standard', 'Vegetarian', 'Halaal', 'Vegan', 'Gluten Free'] },
-  ]);
+  >([]);
   const [ticketDeliveryNote, setTicketDeliveryNote] = useState(
-    'Digital QR pass will be delivered via email and saved to your Nexora Pass wallet. Please present your pass at the expedited check-in gates upon arrival.'
+    'Digital QR pass will be delivered to your Nexora Ticket Vault upon checkout completion.'
   );
 
   // Stage 07: Payments & Payouts
   const [selectedRails, setSelectedRails] = useState<string[]>([
     'Instant EFT (South Africa)',
-    'Capitec Pay',
     'Credit / Debit Card (Visa, Mastercard)',
-    'M-Pesa (East Africa)',
   ]);
-  const [payoutBank, setPayoutBank] = useState('First National Bank (FNB)');
-  const [payoutAccountNumber, setPayoutAccountNumber] = useState('62891048291');
-  const [payoutAccountHolder, setPayoutAccountHolder] = useState('Pan-African Innovation Ventures (Pty) Ltd');
-  const [payoutBranchCode, setPayoutBranchCode] = useState('250655');
+  const [payoutBank, setPayoutBank] = useState('');
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
+  const [payoutAccountHolder, setPayoutAccountHolder] = useState(currentUser?.name || '');
+  const [payoutBranchCode, setPayoutBranchCode] = useState('');
 
   // Stage 08: Marketing & SEO
-  const [seoTitle, setSeoTitle] = useState('Pan-African Tech & Innovation Summit 2026 | Johannesburg');
-  const [seoDescription, setSeoDescription] = useState('Africa’s premier summit bringing together 500+ founders, investors, and ecosystem builders in Sandton, Johannesburg.');
+  const [seoTitle, setSeoTitle] = useState('');
+  const [seoDescription, setSeoDescription] = useState('');
   const [shareCopyCopied, setShareCopyCopied] = useState<string | null>(null);
 
   // New item inputs
@@ -295,7 +206,7 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
   const [newQuestionLabel, setNewQuestionLabel] = useState('');
   const [newQuestionType, setNewQuestionType] = useState<'text' | 'dropdown' | 'checkbox'>('text');
 
-  // Initial title setup
+  // Initial title setup (only when duplicating or using an explicit template)
   useEffect(() => {
     if (!title) {
       if (duplicateFromEventId) {
@@ -311,14 +222,10 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
           setVenueCity(found.venue.city);
           setVenueCountry(found.venue.country);
           setCoverImage(found.coverImage);
-          setTicketTiers(found.tickets.map(t => ({ ...t, id: `tier-${Date.now()}-${Math.random().toString(36).substring(7)}`, remaining: t.capacity })));
+          setTicketTiers(found.tickets.map(t => ({ ...t, id: generateUniqueId('tier'), remaining: t.capacity })));
         }
       } else if (initialTemplate) {
         applyTemplate(initialTemplate);
-      } else {
-        setTitle('Pan-African Tech & Innovation Summit 2026');
-        setShortSummary('Two days of keynotes, masterclasses, and venture networking in Johannesburg.');
-        setSlug('pan-african-tech-innovation-summit-2026');
       }
     }
   }, [duplicateFromEventId, initialTemplate]);
@@ -1199,7 +1106,7 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
                           setVenueCity(evt.venue.city);
                           setVenueCountry(evt.venue.country);
                           setCoverImage(evt.coverImage);
-                          setTicketTiers(evt.tickets.map(t => ({ ...t, id: `tier-${Date.now()}-${Math.random().toString(36).substring(7)}`, remaining: t.capacity })));
+                          setTicketTiers(evt.tickets.map(t => ({ ...t, id: generateUniqueId('tier'), remaining: t.capacity })));
                           setCurrentStage('identity');
                         }}
                         className="p-3 rounded-xl border border-white/10 hover:border-white/40 bg-white/5 flex items-center justify-between cursor-pointer transition-all"

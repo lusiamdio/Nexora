@@ -40,8 +40,6 @@ export const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
   currentCurrency,
   currentUser,
 }) => {
-  if (!isOpen) return null;
-
   // Selected quantities per tier
   const [quantities, setQuantities] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
@@ -59,6 +57,8 @@ export const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
   const [copiedRefCode, setCopiedRefCode] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
+
+  if (!isOpen) return null;
 
   // Referral System Code & Link Generation
   const userIdentifier = currentUser ? currentUser.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() : 'NEX';

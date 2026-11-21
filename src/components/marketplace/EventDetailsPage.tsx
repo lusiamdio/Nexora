@@ -59,6 +59,7 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
 
   const [activeTab, setActiveTab] = useState<'about' | 'agenda' | 'lineup' | 'policies'>('about');
   const [linkCopied, setLinkCopied] = useState(false);
+  const [manualShareUrl, setManualShareUrl] = useState<string | null>(null);
   const [copiedRefCode, setCopiedRefCode] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
@@ -101,13 +102,13 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
     if (navigator.clipboard) {
       navigator.clipboard.writeText(eventUrl).then(() => {
         setLinkCopied(true);
+        setManualShareUrl(null);
         setTimeout(() => setLinkCopied(false), 2500);
       }).catch(() => {
-        // Fallback prompt
-        window.prompt('Copy event URL:', eventUrl);
+        setManualShareUrl(eventUrl);
       });
     } else {
-      window.prompt('Copy event URL:', eventUrl);
+      setManualShareUrl(eventUrl);
     }
   };
 
@@ -247,6 +248,28 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
           </div>
 
         </div>
+
+        {manualShareUrl && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-mono opacity-75">Share event link:</span>
+            <input
+              type="text"
+              readOnly
+              value={manualShareUrl}
+              onClick={(e) => e.currentTarget.select()}
+              className={`flex-1 min-w-[200px] px-3 py-1.5 rounded-lg border font-mono text-xs ${
+                isDark ? 'bg-[#121214] border-white/15 text-white' : 'bg-neutral-100 border-black/15 text-black'
+              }`}
+            />
+            <button
+              type="button"
+              onClick={() => setManualShareUrl(null)}
+              className="px-2.5 py-1 rounded-lg text-xs font-bold opacity-70 hover:opacity-100 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Expansive Webpage Container */}

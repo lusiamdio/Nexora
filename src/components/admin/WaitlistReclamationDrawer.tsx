@@ -18,6 +18,7 @@ import {
 import confetti from 'canvas-confetti';
 import { WaitlistEntry, Event } from '../../types';
 import { store } from '../../lib/store';
+import { getAdminSessionToken } from '../../lib/security';
 
 interface WaitlistReclamationDrawerProps {
   isOpen: boolean;
@@ -57,16 +58,22 @@ export const WaitlistReclamationDrawer: React.FC<WaitlistReclamationDrawerProps>
     setReclaimFeedback(null);
 
     try {
-      // 1. Call server-side background engine endpoint
-      await fetch('/api/waitlist/reclaim-cycle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventId: currentEvent.id,
-          availableTickets: ticketReleaseCount,
-          triggerReason: 'organizer_allocation_release'
-        })
-      });
+      const adminToken = getAdminSessionToken();
+      if (adminToken) {
+        // 1. Call server-side background engine endpoint with admin session token
+        await fetch('/api/waitlist/reclaim-cycle', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Token': adminToken,
+          },
+          body: JSON.stringify({
+            eventId: currentEvent.id,
+            availableTickets: ticketReleaseCount,
+            triggerReason: 'organizer_allocation_release'
+          })
+        });
+      }
     } catch {
       // Graceful fallback to client engine
     }
@@ -160,7 +167,7 @@ export const WaitlistReclamationDrawer: React.FC<WaitlistReclamationDrawerProps>
               <div className="pt-2 border-t border-inherit space-y-2 text-xs font-mono">
                 <div className="flex justify-between">
                   <span className="opacity-60">Venue Capacity:</span>
-                  <span className="font-bold">{currentEvent?.capacityCap || 2600}</span>
+                  <span className="font-bold">{currentEvent?.capacityCap ?? 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="opacity-60">Current Status:</span>
@@ -361,7 +368,8 @@ export const WaitlistReclamationDrawer: React.FC<WaitlistReclamationDrawerProps>
                                     if (onSimulateAttendeeClaim) {
                                       onSimulateAttendeeClaim(entry.claimToken!);
                                     } else {
-                                      window.location.href = `/?claimToken=${entry.claimToken}`;
+                                      window.history.replaceState({}, '', `/?claimToken=${encodeURIComponent(entry.claimToken!)}`);
+                                      setReclaimFeedback(`Priority claim token ${entry.claimToken} loaded into URL bar for attendee checkout.`);
                                     }
                                   }}
                                   className="px-2.5 py-1 rounded text-[10px] font-bold bg-amber-400 text-black hover:bg-amber-300 transition-colors cursor-pointer whitespace-nowrap shadow-xs"

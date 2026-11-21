@@ -13,12 +13,18 @@ import {
   Calendar,
   Check,
   Building2,
-  Zap,
   Ticket as TicketIcon
 } from 'lucide-react';
 import { AuthUser } from '../../types';
 import { store } from '../../lib/store';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import {
+  isValidEmail,
+  sanitizeText,
+  sanitizeSelfSignupRole,
+  registerLocalCredential,
+  verifyLocalCredential,
+} from '../../lib/security';
 import confetti from 'canvas-confetti';
 
 import heroFestivalImg from '../../assets/images/hero_afro_festival_1791591623547.jpg';
@@ -57,76 +63,47 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [forgotEmailSent, setForgotEmailSent] = useState(false);
 
-  // Quick Account Login Handlers for Instant Demo Evaluation
-  const handleFastLogin = (demoRole: 'attendee' | 'organizer' | 'admin') => {
-    setIsLoading(true);
-    setErrorMsg(null);
-    setTimeout(() => {
-      const demoUsers: Record<string, AuthUser> = {
-        attendee: {
-          id: 'usr-buyer-demo',
-          name: 'Nomvula Dlamini',
-          email: 'nomvula.dlamini@example.com',
-          role: 'attendee',
-          provider: 'password',
-        },
-        organizer: {
-          id: 'usr-org-demo',
-          name: 'Sipho Zulu',
-          email: 'sipho@afrovibes.co.za',
-          role: 'organizer',
-          provider: 'password',
-          organizationId: 'org-cape-vibes',
-        },
-        admin: {
-          id: 'usr-admin-demo',
-          name: 'NEXORA Regional Admin',
-          email: 'admin@nexora.events',
-          role: 'admin',
-          provider: 'password',
-        },
-      };
-
-      const selected = demoUsers[demoRole];
-      store.setCurrentUser(selected);
-      confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
-      onAuthenticated(selected);
-      setIsLoading(false);
-    }, 300);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessNotice(null);
 
-    if (mode === 'signup' && !name.trim()) {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = sanitizeText(name, 100);
+
+    if (mode === 'signup' && !cleanName) {
       setErrorMsg('Please specify your full name.');
       return;
     }
 
-    if (!email.trim()) {
+    if (!cleanEmail || !isValidEmail(cleanEmail)) {
       setErrorMsg('Please enter a valid email address.');
       return;
     }
 
-    if (!password.trim() || password.length < 6) {
-      setErrorMsg('Password must be at least 6 characters.');
+    if (!password.trim() || (mode === 'signup' && password.length < 8)) {
+      setErrorMsg(
+        mode === 'signup'
+          ? 'Password must be at least 8 characters.'
+          : 'Please enter your password.'
+      );
       return;
     }
 
+    const safeRole = sanitizeSelfSignupRole(role);
     setIsLoading(true);
 
     if (isSupabaseConfigured()) {
       try {
         if (mode === 'signup') {
           const { data, error } = await supabase.auth.signUp({
-            email: email.trim(),
-            password: password,
+            email: cleanEmail,
+            password,
             options: {
+              emailRedirectTo: window.location.origin,
               data: {
-                full_name: name.trim(),
-                role: role,
+                full_name: cleanName,
+                role: safeRole,
               },
             },
           });
@@ -137,83 +114,130 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             return;
           }
 
-          setIsLoading(false);
-          confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-          const userId = data.user?.id || 'usr-' + Date.now().toString(36);
-          const authenticatedUser: AuthUser = {
-            id: userId,
-            name: name.trim(),
-            email: data.user?.email || email.trim(),
-            role,
-            provider: 'supabase',
-            organizationId: role === 'organizer' ? 'org-' + userId.slice(0, 8) : undefined,
-          };
-          store.setCurrentUser(authenticatedUser);
-          onAuthenticated(authenticatedUser);
-          return;
-        } else {
-          // Login
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email: email.trim(),
-            password: password,
-          });
-
-          if (error) {
-            setErrorMsg(error.message);
+          if (!data.user) {
+            setErrorMsg('Unable to create account. Please verify your details and try again.');
             setIsLoading(false);
             return;
           }
 
           setIsLoading(false);
-          const userMetaRole = (data.user?.user_metadata?.role as AuthUser['role']) || role;
+
+          if (!data.session) {
+            setSuccessNotice(
+              `Verification link sent to ${cleanEmail}. Please confirm your email before signing in.`
+            );
+            return;
+          }
+
+          confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+          const userId = data.user.id;
           const authenticatedUser: AuthUser = {
-            id: data.user?.id || 'usr-' + Date.now().toString(36),
-            name: data.user?.user_metadata?.full_name || email.split('@')[0],
-            email: data.user?.email || email.trim(),
+            id: userId,
+            name: cleanName,
+            email: data.user.email || cleanEmail,
+            role: safeRole,
+            provider: 'supabase',
+            organizationId: safeRole === 'organizer' ? 'org-' + userId.slice(0, 8) : undefined,
+          };
+          store.setCurrentUser(authenticatedUser);
+          onAuthenticated(authenticatedUser);
+          return;
+        } else {
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+
+          if (error || !data.user) {
+            setErrorMsg(error?.message || 'Invalid email or password.');
+            setIsLoading(false);
+            return;
+          }
+
+          setIsLoading(false);
+          const rawMetaRole = data.user.user_metadata?.role;
+          const userMetaRole: AuthUser['role'] =
+            rawMetaRole === 'organizer' || rawMetaRole === 'admin' || rawMetaRole === 'scanner'
+              ? rawMetaRole
+              : 'attendee';
+
+          const authenticatedUser: AuthUser = {
+            id: data.user.id,
+            name: sanitizeText(data.user.user_metadata?.full_name, 100) || cleanEmail.split('@')[0],
+            email: data.user.email || cleanEmail,
             role: userMetaRole,
             provider: 'supabase',
-            organizationId: userMetaRole === 'organizer' ? 'org-' + (data.user?.id || '').slice(0, 8) : undefined,
+            organizationId: userMetaRole === 'organizer' ? 'org-' + data.user.id.slice(0, 8) : undefined,
           };
           store.setCurrentUser(authenticatedUser);
           onAuthenticated(authenticatedUser);
           return;
         }
       } catch (err: any) {
-        console.warn('Supabase auth execution error:', err);
+        setErrorMsg(err?.message || 'Authentication service error. Please try again.');
+        setIsLoading(false);
+        return;
       }
     }
 
-    // Local Fallback
-    setTimeout(() => {
+    // Offline salted credential fallback strictly when Supabase is unconfigured
+    try {
+      const account =
+        mode === 'signup'
+          ? await registerLocalCredential({
+              email: cleanEmail,
+              password,
+              name: cleanName,
+              role: safeRole,
+            })
+          : await verifyLocalCredential(cleanEmail, password);
+
       setIsLoading(false);
       const authenticatedUser: AuthUser = {
-        id: 'usr-' + Date.now().toString(36),
-        name: name.trim() || (mode === 'signup' ? 'New Member' : email.split('@')[0]),
-        email: email.trim(),
-        role,
+        id: account.id,
+        name: account.name,
+        email: account.email,
+        role: account.role,
         provider: 'password',
-        organizationId: role === 'organizer' ? 'org-cape-vibes' : undefined,
+        organizationId: account.role === 'organizer' ? 'org-' + account.id.slice(-8) : undefined,
       };
-
       store.setCurrentUser(authenticatedUser);
       if (mode === 'signup') {
         confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
       }
       onAuthenticated(authenticatedUser);
-    }, 450);
+    } catch (err: any) {
+      setIsLoading(false);
+      setErrorMsg(err?.message || 'Authentication failed.');
+    }
   };
 
-  const handleForgotPassword = (e: React.FormEvent) => {
+  const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) {
-      setErrorMsg('Please specify an email address to send password recovery');
+    setErrorMsg(null);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !isValidEmail(cleanEmail)) {
+      setErrorMsg('Please specify a valid registered email address.');
       return;
     }
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: window.location.origin,
+        });
+        if (error) {
+          setErrorMsg(error.message);
+          setIsLoading(false);
+          return;
+        }
+      }
       setIsLoading(false);
       setForgotEmailSent(true);
-    }, 800);
+    } catch (err: any) {
+      setIsLoading(false);
+      setErrorMsg(err?.message || 'Unable to dispatch recovery email.');
+    }
   };
 
   return (
@@ -324,86 +348,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({
               </span>
             </div>
 
-            {/* Fast Demo One-Click Sign In (For Test Evaluation) */}
-            <div className={`p-4 rounded-2xl space-y-3 border transition-all ${
-              isDark ? 'bg-black/60 border-white/10' : 'bg-white border-black/10 shadow-xs'
-            }`}>
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="font-bold flex items-center gap-1.5 text-amber-400">
-                  <Zap className="w-3.5 h-3.5" />
-                  Instant Test Sign In
-                </span>
-                <span className="opacity-50 text-[10px]">1-Click Role Sandbox</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {/* 1. Buyer: can only see tickets and Marketplace */}
-                <button
-                  type="button"
-                  onClick={() => handleFastLogin('attendee')}
-                  className={`p-3 rounded-xl text-left transition-all cursor-pointer border flex flex-col justify-between group ${
-                    isDark 
-                      ? 'bg-[#141418] hover:bg-[#1c1c22] border-white/10 hover:border-white/30 text-white' 
-                      : 'bg-neutral-50 hover:bg-neutral-100 border-black/10 hover:border-black/30 text-black'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-xs group-hover:text-amber-400 transition-colors">Buyer</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
-                      Attendee
-                    </span>
-                  </div>
-                  <div className="text-[10px] opacity-70 font-mono leading-tight">
-                    Can only see <strong>tickets</strong> & <strong>Marketplace</strong>
-                  </div>
-                </button>
-
-                {/* 2. Organizer: can see tickets and Organizer portal */}
-                <button
-                  type="button"
-                  onClick={() => handleFastLogin('organizer')}
-                  className={`p-3 rounded-xl text-left transition-all cursor-pointer border flex flex-col justify-between group ${
-                    isDark 
-                      ? 'bg-[#141418] hover:bg-[#1c1c22] border-white/10 hover:border-purple-500/40 text-white' 
-                      : 'bg-neutral-50 hover:bg-neutral-100 border-black/10 hover:border-purple-500/40 text-black'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-xs group-hover:text-purple-400 transition-colors">Organizer</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-bold">
-                      Portal
-                    </span>
-                  </div>
-                  <div className="text-[10px] opacity-70 font-mono leading-tight">
-                    Can see <strong>tickets</strong> & <strong>Organizer portal</strong>
-                  </div>
-                </button>
-
-                {/* 3. Admin: connected directly to Super Admin */}
-                <button
-                  type="button"
-                  onClick={() => handleFastLogin('admin')}
-                  className={`p-3 rounded-xl text-left transition-all cursor-pointer border flex flex-col justify-between group ${
-                    isDark 
-                      ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 hover:border-amber-400 text-amber-300' 
-                      : 'bg-amber-50 hover:bg-amber-100 border-amber-300 hover:border-amber-400 text-amber-950'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-xs flex items-center gap-1 group-hover:text-amber-300 transition-colors">
-                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                      Admin
-                    </span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
-                      Root
-                    </span>
-                  </div>
-                  <div className="text-[10px] opacity-80 font-mono leading-tight">
-                    Connected to the <strong>Super Admin</strong> platform
-                  </div>
-                </button>
-              </div>
-            </div>
-
             {/* Standard Credentials Form */}
             {!isForgotPassword ? (
               <form onSubmit={handleSubmit} className="space-y-4">
@@ -450,7 +394,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       required
                       value={name}
                       onChange={e => setName(e.target.value)}
-                      placeholder="e.g. Nomvula Dlamini"
+                      placeholder="Full Name"
                       className={`w-full px-4 py-3 rounded-xl text-sm focus:outline-none ${
                         isDark ? 'bg-black text-white' : 'bg-white text-black'
                       }`}
@@ -508,7 +452,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   </div>
                 </div>
 
-                {/* Error message */}
+                {/* Success / Error message */}
+                {successNotice && (
+                  <div className="p-3 rounded-xl bg-emerald-500/20 text-emerald-400 text-xs font-mono flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{successNotice}</span>
+                  </div>
+                )}
+
                 {errorMsg && (
                   <div className="p-3 rounded-xl bg-red-500/20 text-red-400 text-xs font-mono flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />

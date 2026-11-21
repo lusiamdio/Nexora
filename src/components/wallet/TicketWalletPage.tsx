@@ -20,7 +20,7 @@ import {
   Zap
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import { Ticket, RefundRequest } from '../../types';
+import { Ticket, RefundRequest, AuthUser } from '../../types';
 import { store } from '../../lib/store';
 import { formatCurrency, formatEventDate } from '../../lib/currencies';
 import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
@@ -28,6 +28,7 @@ import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
 
 interface TicketWalletPageProps {
   tickets: Ticket[];
+  currentUser?: AuthUser | null;
   onBack: () => void;
   onRefresh: () => void;
   onExploreEvents: () => void;
@@ -36,6 +37,7 @@ interface TicketWalletPageProps {
 
 export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
   tickets,
+  currentUser,
   onBack,
   onRefresh,
   onExploreEvents,
@@ -43,15 +45,20 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
 }) => {
   const isDark = theme === 'dark';
 
+  // Real-time user filtering: if a user is logged in, display only their own tickets
+  const userTickets = currentUser?.email
+    ? tickets.filter(t => t.attendeeEmail.toLowerCase() === currentUser.email.toLowerCase())
+    : tickets;
+
   const [qrCodeUrls, setQrCodeUrls] = useState<Record<string, string>>({});
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(tickets[0] || null);
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(userTickets[0] || null);
   
   // Transfer state
   const [transferModalTicket, setTransferModalTicket] = useState<Ticket | null>(null);
   const [transferName, setTransferName] = useState('');
   const [transferEmail, setTransferEmail] = useState('');
-  const [transferError, setTransferError] = useState('');
   const [transferSuccess, setTransferSuccess] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   // Refund state
   const [refundModalTicket, setRefundModalTicket] = useState<Ticket | null>(null);
@@ -64,14 +71,17 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
   const [searchRef, setSearchRef] = useState('');
   const [isCashlessOpen, setIsCashlessOpen] = useState(false);
 
-  const activeWaitlistClaim = store.getActiveClaimForUser(
-    tickets[0]?.attendeeEmail || 'nomvula.dlamini@example.com'
-  );
+  const effectiveEmail = currentUser?.email || userTickets[0]?.attendeeEmail || '';
+  const effectiveName = currentUser?.name || userTickets[0]?.attendeeName || '';
+
+  const activeWaitlistClaim = effectiveEmail
+    ? store.getActiveClaimForUser(effectiveEmail)
+    : null;
 
   useEffect(() => {
     async function genQRs() {
       const urls: Record<string, string> = {};
-      for (const t of tickets) {
+      for (const t of userTickets) {
         try {
           urls[t.id] = await QRCode.toDataURL(t.qrPayload, {
             width: 320,
@@ -85,12 +95,14 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
       setQrCodeUrls(urls);
     }
     genQRs();
-    if (!selectedTicket && tickets.length > 0) {
-      setSelectedTicket(tickets[0]);
+    if (!selectedTicket && userTickets.length > 0) {
+      setSelectedTicket(userTickets[0]);
+    } else if (selectedTicket && !userTickets.some(t => t.id === selectedTicket.id)) {
+      setSelectedTicket(userTickets[0] || null);
     }
-  }, [tickets]);
+  }, [userTickets]);
 
-  const filteredTickets = tickets.filter(t => {
+  const filteredTickets = userTickets.filter(t => {
     if (statusFilter !== 'all' && t.status !== statusFilter) return false;
     if (searchRef.trim()) {
       const query = searchRef.toLowerCase();
@@ -104,11 +116,12 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
 
   const handleTransferSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setTransferError(null);
     if (!transferModalTicket || !transferName.trim() || !transferEmail.trim()) return;
 
-    setTransferError('');
-    if (!store.updateTicketAttendee(transferModalTicket.id, transferName.trim(), transferEmail.trim(), transferModalTicket.attendeePhone)) {
-      setTransferError('Could not save the transfer. Please try again.');
+    const res = store.transferTicket(transferModalTicket.id, transferName.trim(), transferEmail.trim());
+    if (!res.success) {
+      setTransferError(res.error || 'Unable to complete ticket transfer.');
       return;
     }
 
@@ -118,6 +131,7 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
       setTransferModalTicket(null);
       setTransferName('');
       setTransferEmail('');
+      setTransferError(null);
       onRefresh();
     }, 1800);
   };
@@ -164,7 +178,7 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
           </button>
 
           <div className="flex items-center gap-2 font-mono text-xs opacity-60">
-            <span>{tickets.length} Digital {tickets.length === 1 ? 'Pass' : 'Passes'} Vaulted</span>
+            <span>{userTickets.length} Digital {userTickets.length === 1 ? 'Pass' : 'Passes'} Vaulted</span>
           </div>
 
         </div>
@@ -369,7 +383,6 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
                     }`}>
                       <button
                         onClick={() => {
-                          setTransferError('');
                           setTransferModalTicket(ticket);
                           setTransferName('');
                           setTransferEmail('');
@@ -417,6 +430,11 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
               </div>
             ) : (
               <form onSubmit={handleTransferSubmit} className="space-y-4">
+                {transferError && (
+                  <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-mono">
+                    {transferError}
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-mono font-bold mb-1 opacity-70">New Attendee Name</label>
                   <input
@@ -443,7 +461,6 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
                     }`}
                   />
                 </div>
-                {transferError && <p role="alert" className="text-xs text-red-600">{transferError}</p>}
                 <div className="flex gap-3 pt-2">
                   <button
                     type="button"
@@ -543,8 +560,8 @@ export const TicketWalletPage: React.FC<TicketWalletPageProps> = ({
         <CashlessTerminalModal
           isOpen={isCashlessOpen}
           onClose={() => setIsCashlessOpen(false)}
-          attendeeEmail={tickets[0]?.attendeeEmail || 'nomvula.dlamini@example.com'}
-          attendeeName={tickets[0]?.attendeeName || 'Nomvula Dlamini'}
+          attendeeEmail={effectiveEmail}
+          attendeeName={effectiveName}
           theme={theme}
         />
       )}
