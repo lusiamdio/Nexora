@@ -24,6 +24,8 @@ import { Event, AuthUser } from '../../types';
 import { formatCurrency, formatEventDate, formatEventTime } from '../../lib/currencies';
 import { store } from '../../lib/store';
 import { WaitlistModal } from './WaitlistModal';
+import { NexoraVenueMap } from '../maps/NexoraVenueMap';
+import { VenueMapsGroundingCard, SearchIntelCard } from '../maps/GroundedIntelligencePanel';
 
 
 interface EventDetailsPageProps {
@@ -357,8 +359,8 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
                   </p>
                 </div>
 
-                {/* Venue Details Card */}
-                <div className={`p-6 sm:p-8 rounded-2xl space-y-4 ${
+                {/* Venue Details Card + Interactive Google Map + Google Maps Grounding */}
+                <div className={`p-6 sm:p-8 rounded-2xl space-y-5 ${
                   isDark ? 'bg-[#0E0E12]' : 'bg-neutral-50'
                 }`}>
                   <h3 className="text-base font-bold tracking-tight flex items-center gap-2">
@@ -370,7 +372,41 @@ export const EventDetailsPage: React.FC<EventDetailsPageProps> = ({
                     <p>{event.venue.address}</p>
                     <p className="text-[11px] pt-1 opacity-60">Venue Location: {event.venue.city}, {event.venue.country}</p>
                   </div>
+
+                  {event.format !== 'online' && (
+                    <>
+                      <NexoraVenueMap
+                        mode="single"
+                        venueName={event.venue.name}
+                        venueAddress={event.venue.address}
+                        venueCity={event.venue.city}
+                        venueCountry={event.venue.country}
+                        coordinates={event.venue.coordinates}
+                        eventTitle={event.title}
+                        heightClassName="h-[300px] sm:h-[340px]"
+                        theme={theme}
+                      />
+
+                      <VenueMapsGroundingCard
+                        venueName={event.venue.name}
+                        city={event.venue.city}
+                        country={event.venue.country}
+                        coordinates={event.venue.coordinates}
+                        theme={theme}
+                        defaultFocus="attendee_arrival"
+                      />
+                    </>
+                  )}
                 </div>
+
+                {/* Live Event & Artist Updates via Google Search */}
+                <SearchIntelCard
+                  initialQuery={`${event.title} ${event.venue.city}`}
+                  category="event_news"
+                  title="Live Event & Artist Updates"
+                  subtitle="Latest official announcements, press coverage, and fan intel grounded via Google Search."
+                  theme={theme}
+                />
 
                 {/* Organizer Verification Card */}
                 <div className={`p-6 sm:p-8 rounded-2xl flex items-center justify-between gap-4 ${

@@ -1,4 +1,5 @@
-import express, { NextFunction, Request, Response } from 'express';
+import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
@@ -10,7 +11,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
 // Ephemeral cryptographically random session secret fallback (never a hardcoded literal)
@@ -30,7 +31,7 @@ app.set('trust proxy', 1);
 app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(), microphone=()');
+  res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self), microphone=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('X-XSS-Protection', '1; mode=block');
 
@@ -151,12 +152,6 @@ const aiLimiter = createRateLimiter({
   windowMs: 60_000,
   max: 20,
   message: 'AI rate limit exceeded. Please wait a minute before retrying.',
-});
-
-const webhookLimiter = createRateLimiter({
-  windowMs: 60_000,
-  max: 100,
-  message: 'Webhook rate limit exceeded.',
 });
 
 app.use('/api', apiGeneralLimiter);
@@ -335,9 +330,17 @@ function verifyClaimedPasskey(candidate: string): boolean {
 // -------------------------------------------------------------
 // 0. Super Admin Authentication, Bootstrap & Session Endpoints
 // -------------------------------------------------------------
+function getConfiguredEnvPasskey(): string | null {
+  const raw = typeof process.env.SUPERADMIN_PASSKEY === 'string' ? process.env.SUPERADMIN_PASSKEY.trim() : '';
+  if (!raw || raw.length < 8 || raw === 'CHANGE_ME_STRONG_PASSKEY') {
+    return null;
+  }
+  return raw;
+}
+
 app.get('/api/admin/bootstrap-status', (_req, res) => {
-  const configuredPasskey = process.env.SUPERADMIN_PASSKEY;
-  if (configuredPasskey && configuredPasskey.length >= 8) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (getConfiguredEnvPasskey()) {
     return res.json({ mode: 'env_configured' });
   }
   if (claimedAdminPasskeyHash) {
@@ -347,12 +350,19 @@ app.get('/api/admin/bootstrap-status', (_req, res) => {
 });
 
 app.post('/api/admin/bootstrap-passkey', adminAuthLimiter, (req, res) => {
-  const configuredPasskey = process.env.SUPERADMIN_PASSKEY;
-  if (configuredPasskey && configuredPasskey.length >= 8) {
-    return res.status(409).json({ error: 'Root passkey is already configured via server environment.' });
+  if (getConfiguredEnvPasskey()) {
+    return res.status(409).json({
+      error: 'Root passkey is already configured via server environment. Enter your configured passkey to sign in.',
+      alreadyConfigured: true,
+      mode: 'env_configured',
+    });
   }
   if (claimedAdminPasskeyHash) {
-    return res.status(409).json({ error: 'Root passkey has already been claimed for this runtime.' });
+    return res.status(409).json({
+      error: 'Root passkey has already been claimed for this runtime. Enter your passkey to sign in.',
+      alreadyConfigured: true,
+      mode: 'claimed',
+    });
   }
 
   const submitted = typeof req.body?.passkey === 'string' ? req.body.passkey.trim() : '';
@@ -374,8 +384,8 @@ app.post('/api/admin/bootstrap-passkey', adminAuthLimiter, (req, res) => {
 });
 
 app.post('/api/admin/verify-passkey', adminAuthLimiter, (req, res) => {
-  const configuredPasskey = process.env.SUPERADMIN_PASSKEY;
-  const hasEnvPasskey = Boolean(configuredPasskey && configuredPasskey.length >= 8);
+  const configuredPasskey = getConfiguredEnvPasskey();
+  const hasEnvPasskey = Boolean(configuredPasskey);
 
   if (!hasEnvPasskey && !claimedAdminPasskeyHash) {
     return res.status(409).json({
@@ -551,6 +561,34 @@ Return a comprehensive risk analysis in JSON format conforming strictly to the r
 });
 
 // -------------------------------------------------------------
+// 1b. Google Maps Platform Public Client Config (Browser-restricted key)
+// -------------------------------------------------------------
+app.get('/api/config/maps', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const mapsKey = (
+    process.env.VITE_GOOGLE_MAPS_API_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    ''
+  ).trim();
+  return res.json({
+    apiKey: mapsKey,
+    configured: Boolean(mapsKey && mapsKey !== 'MY_GOOGLE_MAPS_API_KEY'),
+  });
+});
+
+interface GroundedMapSource {
+  title: string;
+  uri: string;
+  placeId?: string;
+  reviewSnippets?: string[];
+}
+
+interface GroundedWebSource {
+  title: string;
+  uri: string;
+}
+
+// -------------------------------------------------------------
 // 2. Google Maps Grounded Venue Intelligence
 // -------------------------------------------------------------
 app.post('/api/ai/venue-maps-intel', aiLimiter, async (req, res) => {
@@ -558,6 +596,15 @@ app.post('/api/ai/venue-maps-intel', aiLimiter, async (req, res) => {
     const safeVenue = sanitizeInputString(req.body?.venueName, 160);
     const safeCity = sanitizeInputString(req.body?.city, 80) || 'Cape Town';
     const safeCountry = sanitizeInputString(req.body?.country, 80) || 'South Africa';
+    const safeFocus = sanitizeInputString(req.body?.focus, 40) || 'operations_safety';
+
+    const rawLat = typeof req.body?.lat === 'number' ? req.body.lat : Number(req.body?.lat);
+    const rawLng = typeof req.body?.lng === 'number' ? req.body.lng : Number(req.body?.lng);
+    const hasValidCoords =
+      Number.isFinite(rawLat) &&
+      Number.isFinite(rawLng) &&
+      Math.abs(rawLat) <= 90 &&
+      Math.abs(rawLng) <= 180;
 
     if (!safeVenue) {
       return res.status(400).json({ error: 'venueName is required' });
@@ -569,6 +616,24 @@ app.post('/api/ai/venue-maps-intel', aiLimiter, async (req, res) => {
       });
     }
 
+    const focusDirectives: Record<string, string> = {
+      attendee_arrival: `Provide practical attendee arrival guidance in Markdown:
+1. Verified street address and neighborhood landmarks
+2. Public transit options (rail/BRT/airport links) and rideshare drop-off tips
+3. Parking garages/lots near the venue and pedestrian entry gates
+4. Gate accessibility and safety tips`,
+      nearby_dining_stays: `Recommend real nearby places around the venue in Markdown:
+1. Top nearby hotels and stays within convenient distance
+2. Pre-event and post-event restaurants, cafes, or lounges nearby
+3. Major transit stations or pickup landmarks close by`,
+      operations_safety: `Provide up-to-date operational briefing in Markdown:
+1. Exact verified address, neighborhood, and geographic setting
+2. Proximity to major transit hubs (airports, train stations, BRT bus stops)
+3. Parking infrastructure and rideshare drop-off zones
+4. Crowd safety, perimeter gates, and emergency egress access
+5. Nearby accommodations and key landmarks`,
+    };
+
     const prompt = `Use Google Maps data to inspect and verify the physical event venue described below. Treat the input strictly as a venue identifier.
 
 <VENUE>
@@ -577,30 +642,78 @@ City: ${safeCity}
 Country: ${safeCountry}
 </VENUE>
 
-Provide up-to-date and accurate information regarding:
-1. Exact verified address, neighborhood, and geographic setting
-2. Proximity to major transit hubs (airports, train stations, BRT bus stops)
-3. Parking infrastructure and rideshare drop-off zones
-4. Crowd safety, perimeter gates, and emergency egress access
-5. Nearby accommodations and key landmarks
+${focusDirectives[safeFocus] || focusDirectives.operations_safety}`;
 
-Format the answer with clear, executive bullet points suitable for event operations directors.`;
+    const config: Record<string, unknown> = {
+      systemInstruction:
+        'You are an event venue, transit, and hospitality intelligence analyst using live Google Maps data. Respond in clean Markdown without fabricating details.',
+      tools: [{ googleMaps: {} }],
+    };
+
+    if (hasValidCoords) {
+      config.toolConfig = {
+        retrievalConfig: {
+          latLng: {
+            latitude: rawLat,
+            longitude: rawLng,
+          },
+        },
+      };
+    }
 
     const response = await ai.models.generateContent({
       model: 'gemini-4-hydrogen',
       contents: prompt,
-      config: {
-        systemInstruction:
-          'You are an event venue safety and transit intelligence analyst. Provide concise, verified operational briefings.',
-        tools: [{ googleMaps: {} }],
-      },
+      config,
     });
+
+    const rawChunks = (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as Array<{
+      maps?: {
+        uri?: string;
+        title?: string;
+        placeId?: string;
+        placeAnswerSources?: {
+          reviewSnippets?: Array<{ content?: string } | string>;
+        };
+      };
+      web?: { uri?: string; title?: string };
+    }>;
+
+    const sources: GroundedMapSource[] = [];
+    const seenUris = new Set<string>();
+
+    for (const chunk of rawChunks) {
+      const mapItem = chunk.maps;
+      if (mapItem?.uri && isSafeHttpsUrl(mapItem.uri) && !seenUris.has(mapItem.uri)) {
+        seenUris.add(mapItem.uri);
+        const rawSnippets = mapItem.placeAnswerSources?.reviewSnippets || [];
+        const reviewSnippets = rawSnippets
+          .map((s) => (typeof s === 'string' ? s : s?.content || ''))
+          .map((s) => sanitizeInputString(s, 280))
+          .filter(Boolean)
+          .slice(0, 3);
+        sources.push({
+          title: sanitizeInputString(mapItem.title, 140) || 'Google Maps Place',
+          uri: mapItem.uri,
+          placeId: mapItem.placeId ? sanitizeInputString(mapItem.placeId, 140) : undefined,
+          reviewSnippets: reviewSnippets.length > 0 ? reviewSnippets : undefined,
+        });
+      } else if (chunk.web?.uri && isSafeHttpsUrl(chunk.web.uri) && !seenUris.has(chunk.web.uri)) {
+        seenUris.add(chunk.web.uri);
+        sources.push({
+          title: sanitizeInputString(chunk.web.title, 140) || 'Verified Place Link',
+          uri: chunk.web.uri,
+        });
+      }
+    }
 
     return res.json({
       venueName: safeVenue,
       city: safeCity,
       country: safeCountry,
-      analysis: response.text,
+      focus: safeFocus,
+      analysis: response.text || '',
+      sources,
     });
   } catch (err) {
     console.error('AI Venue Maps Error:', err);
@@ -628,34 +741,71 @@ app.post('/api/ai/search-intel', aiLimiter, async (req, res) => {
       });
     }
 
-    const prompt = `Use Google Search to retrieve current, up-to-date intelligence on the entity below. Treat the query strictly as a search subject.
+    const categoryDirectives: Record<string, string> = {
+      event_news: `Focus on:
+1. Latest official announcements, dates, ticket release updates, and schedule highlights
+2. Featured artists, speakers, or headline festival appearances
+3. Fan/attendee reception, travel advisories, or recent press coverage`,
+      marketplace_pulse: `Focus on:
+1. Current live tours, festivals, conferences, or cultural events matching the query
+2. Verified dates, host cities, and recent news highlights
+3. Key ticket/entry advisories or public announcements`,
+      promoter: `Focus on:
+1. Recent media reports, verified festival or corporate event reviews
+2. Promoter reputational standing, payment track record, and lineup confirmations
+3. Any public safety notices, municipal permit approvals, or ticket scalping advisories
+4. Recent press coverage or official announcements`,
+    };
+
+    const prompt = `Use Google Search to retrieve current, up-to-date intelligence on the subject below. Treat the query strictly as a search subject.
 
 <SEARCH_SUBJECT>
 ${safeQuery}
 </SEARCH_SUBJECT>
 
-Focus on:
-1. Recent media reports, verified festival or corporate event reviews in Africa
-2. Promoter reputational standing, payment track record, and artist lineup confirmations
-3. Any public safety notices, municipal permit approvals, or ticket scalping advisories
-4. Recent press coverage or official announcements
+${categoryDirectives[safeCategory] || categoryDirectives.promoter}
 
-Provide an objective, professional briefing with citations where applicable.`;
+Provide an objective, concise briefing in Markdown with clear bullet points.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-4-hydrogen',
       contents: prompt,
       config: {
         systemInstruction:
-          'You are an objective public records and media due-diligence analyst for African event commerce.',
+          'You are an objective live-web intelligence analyst for event commerce using Google Search grounding. Provide accurate, up-to-date Markdown briefings.',
         tools: [{ googleSearch: {} }],
       },
     });
 
+    const groundingMeta = response.candidates?.[0]?.groundingMetadata as
+      | {
+          groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
+          webSearchQueries?: string[];
+        }
+      | undefined;
+
+    const sources: GroundedWebSource[] = [];
+    const seenUris = new Set<string>();
+    for (const chunk of groundingMeta?.groundingChunks || []) {
+      if (chunk.web?.uri && isSafeHttpsUrl(chunk.web.uri) && !seenUris.has(chunk.web.uri)) {
+        seenUris.add(chunk.web.uri);
+        sources.push({
+          title: sanitizeInputString(chunk.web.title, 140) || chunk.web.uri,
+          uri: chunk.web.uri,
+        });
+      }
+    }
+
+    const searchQueries = Array.isArray(groundingMeta?.webSearchQueries)
+      ? groundingMeta.webSearchQueries.map((q) => sanitizeInputString(q, 120)).filter(Boolean)
+      : [];
+
     return res.json({
       query: safeQuery,
       category: safeCategory,
-      analysis: response.text,
+      analysis: response.text || '',
+      sources,
+      searchQueries,
     });
   } catch (err) {
     console.error('AI Search Intel Error:', err);
@@ -784,119 +934,6 @@ app.post('/api/waitlist/reclaim-cycle', requireAdminAuth, (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// 6. Cryptographic Webhook Receivers (Fail-Closed Timing-Safe Verification)
-// -------------------------------------------------------------
-// Paystack webhook with SHA-512 HMAC verification
-app.post('/api/webhooks/paystack', webhookLimiter, (req: Request & { rawBody?: Buffer }, res) => {
-  const secret = process.env.PAYSTACK_SECRET_KEY;
-  if (!secret) {
-    return res.status(503).json({ error: 'Paystack webhook secret is not configured.' });
-  }
-
-  const signature = req.headers['x-paystack-signature'];
-  if (typeof signature !== 'string' || !signature.trim()) {
-    return res.status(400).json({ error: 'Missing x-paystack-signature header' });
-  }
-
-  const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
-  const expected = crypto.createHmac('sha512', secret).update(raw).digest('hex');
-
-  if (!timingSafeEqualNormalized(signature.trim(), expected)) {
-    return res.status(401).json({ error: 'Invalid Paystack HMAC signature' });
-  }
-
-  const event = sanitizeInputString(req.body?.event, 80) || 'charge.success';
-  const reference = sanitizeInputString(req.body?.data?.reference, 120) || 'REF-' + Date.now();
-
-  return res.status(200).json({
-    received: true,
-    provider: 'Paystack',
-    event,
-    reference,
-    verified: true,
-    processedAt: new Date().toISOString(),
-  });
-});
-
-// Stripe webhook with t=...,v1=... SHA-256 HMAC & replay window verification
-app.post('/api/webhooks/stripe', webhookLimiter, (req: Request & { rawBody?: Buffer }, res) => {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) {
-    return res.status(503).json({ error: 'Stripe webhook secret is not configured.' });
-  }
-
-  const sigHeader = req.headers['stripe-signature'];
-  if (typeof sigHeader !== 'string' || !sigHeader.trim()) {
-    return res.status(400).json({ error: 'Missing stripe-signature header' });
-  }
-
-  const elements = sigHeader.split(',').map((part) => part.trim());
-  let timestampStr = '';
-  const v1Signatures: string[] = [];
-
-  for (const el of elements) {
-    const eqIdx = el.indexOf('=');
-    if (eqIdx === -1) continue;
-    const key = el.slice(0, eqIdx).trim();
-    const val = el.slice(eqIdx + 1).trim();
-    if (key === 't') timestampStr = val;
-    else if (key === 'v1') v1Signatures.push(val);
-  }
-
-  const timestampSec = Number(timestampStr);
-  if (!timestampStr || !Number.isFinite(timestampSec) || v1Signatures.length === 0) {
-    return res.status(401).json({ error: 'Malformed Stripe signature header' });
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (Math.abs(nowSec - timestampSec) > 300) {
-    return res.status(401).json({ error: 'Stripe webhook timestamp outside replay tolerance window' });
-  }
-
-  const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
-  const signedPayload = `${timestampStr}.${raw}`;
-  const expected = crypto.createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');
-
-  const hasValidSig = v1Signatures.some((candidate) => timingSafeEqualNormalized(candidate, expected));
-  if (!hasValidSig) {
-    return res.status(401).json({ error: 'Invalid Stripe signature' });
-  }
-
-  return res.status(200).json({
-    received: true,
-    provider: 'Stripe',
-    eventType: sanitizeInputString(req.body?.type, 80) || 'payment_intent.succeeded',
-    verified: true,
-    processedAt: new Date().toISOString(),
-  });
-});
-
-// Flutterwave webhook with timing-safe Secret Hash verification
-app.post('/api/webhooks/flutterwave', webhookLimiter, (req, res) => {
-  const expectedHash = process.env.FLUTTERWAVE_SECRET_HASH;
-  if (!expectedHash) {
-    return res.status(503).json({ error: 'Flutterwave webhook secret hash is not configured.' });
-  }
-
-  const secretHash = req.headers['verif-hash'];
-  if (typeof secretHash !== 'string' || !secretHash.trim()) {
-    return res.status(400).json({ error: 'Missing verif-hash header' });
-  }
-
-  if (!timingSafeEqualNormalized(secretHash.trim(), expectedHash)) {
-    return res.status(401).json({ error: 'Invalid Flutterwave verif-hash' });
-  }
-
-  return res.status(200).json({
-    received: true,
-    provider: 'Flutterwave',
-    event: sanitizeInputString(req.body?.event, 80) || 'charge.completed',
-    verified: true,
-    processedAt: new Date().toISOString(),
-  });
-});
-
 // Health check endpoint (minimal public telemetry)
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -993,10 +1030,10 @@ app.get('/api/supabase/status', requireAdminAuth, async (_req, res) => {
 });
 
 app.post('/api/admin/rotate-keys', requireAdminAuth, adminAuthLimiter, (req, res) => {
-  const { passkey, newAnonKey, newUrl, webhookSecret } = req.body || {};
+  const { passkey, newAnonKey, newUrl } = req.body || {};
 
   // Require secondary passkey confirmation when configured on the server or claimed
-  const configuredPasskey = process.env.SUPERADMIN_PASSKEY;
+  const configuredPasskey = getConfiguredEnvPasskey();
   if (configuredPasskey) {
     const submittedPasskey = typeof passkey === 'string' ? passkey.trim() : '';
     if (!submittedPasskey || !timingSafeEqualNormalized(submittedPasskey, configuredPasskey)) {
@@ -1028,15 +1065,6 @@ app.post('/api/admin/rotate-keys', requireAdminAuth, adminAuthLimiter, (req, res
     process.env.VITE_SUPABASE_ANON_KEY = cleanKey;
   }
 
-  if (typeof webhookSecret === 'string' && webhookSecret.trim()) {
-    const cleanSecret = webhookSecret.trim();
-    if (cleanSecret.length < 16 || cleanSecret.length > 512) {
-      return res.status(400).json({ error: 'Webhook secret must be between 16 and 512 characters.' });
-    }
-    process.env.PAYSTACK_SECRET_KEY = cleanSecret;
-    process.env.STRIPE_WEBHOOK_SECRET = cleanSecret;
-  }
-
   const anonKey = process.env.Supabase_anon_key || process.env.VITE_SUPABASE_ANON_KEY || '';
   const fingerprint = anonKey.length > 12 ? `${anonKey.slice(0, 6)}...${anonKey.slice(-4)}` : 'rotated';
 
@@ -1047,6 +1075,11 @@ app.post('/api/admin/rotate-keys', requireAdminAuth, adminAuthLimiter, (req, res
     keyFingerprint: fingerprint,
     project: process.env.Supabase_project_id || 'kunabampibfcmnbyjads',
   });
+});
+
+// Return JSON 404 for unmatched /api routes instead of falling through to the SPA catch-all
+app.use('/api', (_req, res) => {
+  return res.status(404).json({ error: 'API route not found.' });
 });
 
 // API JSON error & malformed payload handler (prevents HTML stack trace responses)

@@ -269,7 +269,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       </div>
 
       {/* Main Expansive Webpage Container */}
-      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
         
         <div className={`grid grid-cols-1 lg:grid-cols-12 rounded-3xl overflow-hidden shadow-2xl ${
           isDark ? 'bg-[#0E0E12]' : 'bg-neutral-50'
@@ -548,6 +548,27 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
           </div>
 
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <iframe
+            src="https://password-strength.utils.com?embed=1"
+            title="Password Strength Checker"
+            loading="lazy"
+            className="w-full h-[560px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+          />
+          <iframe
+            src="https://breach-checker.utils.com?embed=1"
+            title="Data Breach Checker"
+            loading="lazy"
+            className="w-full h-[520px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+          />
+          <iframe
+            src="https://password-generator.utils.com?embed=1"
+            title="Secure Password Generator"
+            loading="lazy"
+            className="w-full h-[620px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+          />
         </div>
 
       </div>

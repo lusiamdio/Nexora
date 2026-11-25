@@ -44,13 +44,11 @@ Copy `.env.example` and set only the integrations you need. Restart the server a
 | --- | --- |
 | `PORT` | Express port; defaults to 3000. |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SUPABASE_PROJECT_ID` | Optional public Supabase project configuration. |
-| `GEMINI_API_KEY` | Enables server-side Gemini requests. Without it, AI endpoints return demonstration responses. |
-| `PAYSTACK_SECRET_KEY` | Required to verify Paystack webhooks. |
-| `STRIPE_WEBHOOK_SECRET` | Required to verify Stripe webhooks, including the timestamp and v1 signature. |
-| `FLUTTERWAVE_SECRET_HASH` | Required for the legacy Flutterwave `verif-hash` webhook header. |
-| `ADMIN_ROTATION_PASSKEY` | Enables the configuration rotation endpoint. Use only in a controlled test environment; changes are process-local and lost on restart. |
+| `GEMINI_API_KEY` | Enables server-side Gemini requests. Without it, AI endpoints return HTTP 503. |
+| `SUPERADMIN_PASSKEY` | Enables passkey authentication for Super Admin APIs and configuration rotation. |
+| `ADMIN_SESSION_SECRET` | Optional 32+ character HMAC signing key for short-lived admin session tokens. |
 
-Webhook endpoints return 503 if their secret is missing and reject invalid signatures. They do not implement event processing, durable idempotency, payment verification or ticket issuance. The rotation endpoint only accepts HTTPS `*.supabase.co` project URLs. Browser-side credential rotation affects only the current session.
+The rotation endpoint requires a valid admin session token and rejects localhost/private network URLs. Browser-side credential rotation affects only the current runtime session.
 
 ## Database
 
@@ -85,4 +83,4 @@ The server test starts a separate production-mode process on a temporary port wi
 
 ## API overview
 
-The Express server exposes `GET /api/health`, optional AI endpoints under `/api/ai/`, a simulated waitlist endpoint, provider webhook endpoints under `/api/webhooks/`, and Supabase status/configuration endpoints. The health endpoint indicates only that the process responds; it does not establish database connectivity or financial correctness.
+The Express server exposes `GET /api/health`, admin session/bootstrap routes under `/api/admin/`, admin-protected AI endpoints under `/api/ai/`, an admin-protected waitlist endpoint, and Supabase status/schema endpoints. The health endpoint indicates only that the process responds; it does not establish database connectivity or financial correctness.

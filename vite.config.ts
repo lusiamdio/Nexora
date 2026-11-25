@@ -36,6 +36,11 @@ export default defineConfig(({ mode }) => {
         env.Supabase_publishable_key ||
         ''
       ),
+      'import.meta.env.VITE_GOOGLE_MAPS_API_KEY': JSON.stringify(
+        env.VITE_GOOGLE_MAPS_API_KEY ||
+        env.GOOGLE_MAPS_API_KEY ||
+        ''
+      ),
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

@@ -38,6 +38,8 @@ import {
 import { Event, TicketTier, EventCategory, EventFormat, AgendaItem, Performer } from '../../types';
 import { store } from '../../lib/store';
 import { generateUniqueId } from '../../lib/security';
+import { VenuePlaceAutocomplete } from '../maps/VenuePlaceAutocomplete';
+import { NexoraVenueMap } from '../maps/NexoraVenueMap';
 
 import heroFestivalImg from '../../assets/images/hero_afro_festival_1791591623547.jpg';
 import techSummitImg from '../../assets/images/event_tech_summit_1791591635169.jpg';
@@ -118,6 +120,7 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
   const [venueAddress, setVenueAddress] = useState('');
   const [venueCity, setVenueCity] = useState('');
   const [venueCountry, setVenueCountry] = useState('South Africa');
+  const [venueCoordinates, setVenueCoordinates] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [virtualUrl, setVirtualUrl] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -179,14 +182,26 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
   );
 
   // Stage 07: Payments & Payouts
+  const initialOrganizerProfile = existingOrganizers.find(o => o.id === selectedOrganizerId) || existingOrganizers[0];
   const [selectedRails, setSelectedRails] = useState<string[]>([
-    'Instant EFT (South Africa)',
+    'Instant EFT',
     'Credit / Debit Card (Visa, Mastercard)',
+    'Mobile Money (M-Pesa, MTN MoMo, Airtel Money)',
   ]);
-  const [payoutBank, setPayoutBank] = useState('');
-  const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
-  const [payoutAccountHolder, setPayoutAccountHolder] = useState(currentUser?.name || '');
-  const [payoutBranchCode, setPayoutBranchCode] = useState('');
+  const [payoutBank, setPayoutBank] = useState(initialOrganizerProfile?.bankDetails?.bankName || '');
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState(initialOrganizerProfile?.bankDetails?.accountNumber || '');
+  const [payoutConfirmAccountNumber, setPayoutConfirmAccountNumber] = useState(initialOrganizerProfile?.bankDetails?.accountNumber || '');
+  const [payoutAccountHolder, setPayoutAccountHolder] = useState(
+    initialOrganizerProfile?.bankDetails?.accountHolder || currentUser?.name || ''
+  );
+  const [payoutBranchCode, setPayoutBranchCode] = useState(initialOrganizerProfile?.bankDetails?.branchCode || '');
+  const [payoutAccountType, setPayoutAccountType] = useState(
+    initialOrganizerProfile?.bankDetails?.accountType || 'Business Cheque'
+  );
+  const [payoutBankConfirmed, setPayoutBankConfirmed] = useState(
+    Boolean(initialOrganizerProfile?.bankDetails?.confirmed)
+  );
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   // Stage 08: Marketing & SEO
   const [seoTitle, setSeoTitle] = useState('');
@@ -221,6 +236,7 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
           setVenueAddress(found.venue.address);
           setVenueCity(found.venue.city);
           setVenueCountry(found.venue.country);
+          setVenueCoordinates(found.venue.coordinates);
           setCoverImage(found.coverImage);
           setTicketTiers(found.tickets.map(t => ({ ...t, id: generateUniqueId('tier'), remaining: t.capacity })));
         }
@@ -528,6 +544,15 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
     }, 800);
   };
 
+  const isPaidEvent = ticketTiers.some(t => t.priceMinor > 0);
+  const isPayoutBankValid = Boolean(
+    payoutBank.trim().length >= 2 &&
+      payoutAccountHolder.trim().length >= 2 &&
+      payoutAccountNumber.trim().length >= 5 &&
+      payoutAccountNumber.trim() === payoutConfirmAccountNumber.trim() &&
+      payoutBankConfirmed
+  );
+
   // Readiness Calculation
   const readinessChecks = useMemo(() => {
     return [
@@ -538,9 +563,14 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
       { id: 'capacity', label: 'Overall capacity configured', passed: capacityCap > 0, weight: 10 },
       { id: 'cover', label: 'Cover banner artwork selected', passed: Boolean(coverImage), weight: 10 },
       { id: 'policies', label: 'Refund policy defined', passed: refundPolicy.trim().length >= 10, weight: 10 },
-      { id: 'payouts', label: 'Payout bank account configured', passed: payoutAccountNumber.trim().length >= 5, weight: 15 },
+      {
+        id: 'payouts',
+        label: 'Payout bank account added & confirmed',
+        passed: isPaidEvent ? isPayoutBankValid : isPayoutBankValid || true,
+        weight: 15,
+      },
     ];
-  }, [title, format, virtualUrl, venueName, startDate, endDate, ticketTiers, capacityCap, coverImage, refundPolicy, payoutAccountNumber]);
+  }, [title, format, virtualUrl, venueName, startDate, endDate, ticketTiers, capacityCap, coverImage, refundPolicy, isPaidEvent, isPayoutBankValid]);
 
   const readinessScore = useMemo(() => {
     return readinessChecks.reduce((acc, item) => (item.passed ? acc + item.weight : acc), 0);
@@ -678,11 +708,13 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
   // Navigation handlers
   const currentStageIndex = STAGES.findIndex(s => s.id === currentStage);
   const handleNextStage = () => {
+    setPublishError(null);
     if (currentStageIndex < STAGES.length - 1) {
       setCurrentStage(STAGES[currentStageIndex + 1].id);
     }
   };
   const handlePrevStage = () => {
+    setPublishError(null);
     if (currentStageIndex > 0) {
       setCurrentStage(STAGES[currentStageIndex - 1].id);
     }
@@ -690,6 +722,36 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
 
   // Final Publish Handler
   const handlePublish = (status: 'published' | 'draft' = 'published') => {
+    setPublishError(null);
+    if (status === 'published' && isPaidEvent && !isPayoutBankValid) {
+      setPublishError(
+        'Organizers must add and confirm their settlement bank account details (with matching Confirm Account Number) in Stage 07 before publishing paid tickets.'
+      );
+      setCurrentStage('payments');
+      return;
+    }
+
+    let resolvedOrganizerId = selectedOrganizerId;
+    if (currentUser && !store.getOrganizer(resolvedOrganizerId)) {
+      resolvedOrganizerId = store.ensureOrganizerForUser(currentUser).id;
+    }
+
+    if (isPayoutBankValid && resolvedOrganizerId) {
+      store.updateOrganizerProfile(resolvedOrganizerId, {
+        bankDetails: {
+          bankName: payoutBank.trim(),
+          accountNumber: payoutAccountNumber.trim(),
+          accountHolder: payoutAccountHolder.trim(),
+          branchCode: payoutBranchCode.trim(),
+          accountType: payoutAccountType,
+          confirmed: true,
+          confirmedAt: new Date().toISOString(),
+        },
+      });
+    }
+
+    const resolvedOrganizer = store.getOrganizer(resolvedOrganizerId) || existingOrganizers.find(o => o.id === resolvedOrganizerId);
+
     const finalEvent = store.createEvent({
       slug: slug || `event-${Date.now()}`,
       title: title || 'Untitled Event',
@@ -698,19 +760,20 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
       format,
       description,
       coverImage: customBannerUrl || coverImage,
-      startDate: new Date(startDate).toISOString(),
-      endDate: new Date(endDate).toISOString(),
+      startDate: new Date(startDate || Date.now()).toISOString(),
+      endDate: new Date(endDate || Date.now() + 4 * 60 * 60 * 1000).toISOString(),
       timezone,
       venue: {
         name: venueName,
         address: venueAddress,
         city: venueCity,
         country: venueCountry,
+        coordinates: venueCoordinates,
       },
       virtualUrl: format !== 'in_person' ? virtualUrl : undefined,
       organizer: {
-        id: selectedOrganizerId,
-        name: existingOrganizers.find(o => o.id === selectedOrganizerId)?.name || 'Nexora Verified Organizer',
+        id: resolvedOrganizerId,
+        name: resolvedOrganizer?.name || 'Nexora Verified Organizer',
         verified: true,
         rating: 4.9,
       },
@@ -738,12 +801,14 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
         description: seoDescription,
         slug: slug,
       },
-      payoutSettings: {
-        bankName: payoutBank,
-        accountNumber: payoutAccountNumber,
-        currency,
-        accountHolder: payoutAccountHolder,
-      },
+      payoutSettings: isPayoutBankValid
+        ? {
+            bankName: payoutBank.trim(),
+            accountNumber: payoutAccountNumber.trim(),
+            currency,
+            accountHolder: payoutAccountHolder.trim(),
+          }
+        : undefined,
     });
 
     onEventCreated(finalEvent);
@@ -1224,6 +1289,16 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
                 {/* Venue or Virtual Link */}
                 {format !== 'online' ? (
                   <div className="space-y-3 pt-2 border-t border-white/10">
+                    <VenuePlaceAutocomplete
+                      onPlaceResolved={(place) => {
+                        setVenueName(place.name);
+                        setVenueAddress(place.address);
+                        if (place.city) setVenueCity(place.city);
+                        if (place.country) setVenueCountry(place.country);
+                        if (place.coordinates) setVenueCoordinates(place.coordinates);
+                      }}
+                    />
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-xs font-bold text-white block mb-1">Venue Name *</label>
@@ -1269,6 +1344,22 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
                         />
                       </div>
                     </div>
+
+                    {venueCoordinates && (
+                      <div className="pt-2">
+                        <NexoraVenueMap
+                          mode="single"
+                          venueName={venueName || 'Selected Venue'}
+                          venueAddress={venueAddress}
+                          venueCity={venueCity}
+                          venueCountry={venueCountry}
+                          coordinates={venueCoordinates}
+                          heightClassName="h-[220px]"
+                          enableDirections={false}
+                          theme="dark"
+                        />
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="pt-2 border-t border-white/10">
@@ -2228,16 +2319,21 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
                 </p>
               </div>
 
+              {publishError && (
+                <div className="p-4 rounded-xl bg-amber-500/15 ring-1 ring-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                  <span>{publishError}</span>
+                </div>
+              )}
+
               {/* Africa-first Payment Rails */}
-              <div className="p-6 rounded-2xl bg-[#111722] border border-white/10 space-y-4">
+              <div className="p-6 rounded-2xl bg-[#111722] ring-1 ring-white/10 space-y-4">
                 <h3 className="text-sm font-bold text-white">Active Payment Rails for Checkout</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
-                    'Instant EFT (South Africa)',
-                    'Capitec Pay',
                     'Credit / Debit Card (Visa, Mastercard)',
-                    'M-Pesa (East Africa)',
-                    'Flutterwave / Paystack Bank Transfer',
+                    'Instant EFT',
+                    'Mobile Money (M-Pesa, MTN MoMo, Airtel Money)',
                   ].map(rail => {
                     const isSelected = selectedRails.includes(rail);
                     return (
@@ -2248,14 +2344,14 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
                             isSelected ? prev.filter(r => r !== rail) : [...prev, rail]
                           );
                         }}
-                        className={`p-3 rounded-xl border cursor-pointer flex items-center justify-between transition-all ${
-                          isSelected ? 'bg-white/10 border-white' : 'bg-black/30 border-white/10'
+                        className={`p-3 rounded-xl ring-1 cursor-pointer flex items-center justify-between transition-all ${
+                          isSelected ? 'bg-white/10 ring-white' : 'bg-black/30 ring-white/10'
                         }`}
                       >
                         <span className="text-xs text-white font-medium">{rail}</span>
                         <div
-                          className={`w-4 h-4 rounded flex items-center justify-center border ${
-                            isSelected ? 'bg-white text-black border-white' : 'border-white/30'
+                          className={`w-4 h-4 rounded flex items-center justify-center ring-1 ${
+                            isSelected ? 'bg-white text-black ring-white' : 'ring-white/30'
                           }`}
                         >
                           {isSelected && <Check className="w-3 h-3" />}
@@ -2267,25 +2363,37 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
               </div>
 
               {/* Bank Payout Account */}
-              <div className="p-6 rounded-2xl bg-[#111722] border border-white/10 space-y-4">
-                <h3 className="text-sm font-bold text-white">Settlement Payout Account *</h3>
+              <div className="p-6 rounded-2xl bg-[#111722] ring-1 ring-white/10 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Settlement Bank Account (Required to Receive Payments) *</h3>
+                    <p className="text-[11px] text-white/60 mt-0.5">
+                      Ticket revenues credit your Nexora Wallet and unlock for bank withdrawal once the event ends. You can change these details anytime.
+                    </p>
+                  </div>
+                  <span className={`text-[11px] font-mono font-bold ${isPayoutBankValid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {isPayoutBankValid ? 'Confirmed' : 'Confirmation Required'}
+                  </span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-white block mb-1">Bank Name</label>
+                    <label className="text-xs font-bold text-white block mb-1">Bank Name *</label>
                     <input
                       type="text"
                       value={payoutBank}
                       onChange={e => setPayoutBank(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/15 text-xs text-white"
+                      placeholder="e.g. First National Bank"
+                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 ring-1 ring-white/15 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-white block mb-1">Account Holder Name</label>
+                    <label className="text-xs font-bold text-white block mb-1">Account Holder Name *</label>
                     <input
                       type="text"
                       value={payoutAccountHolder}
                       onChange={e => setPayoutAccountHolder(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/15 text-xs text-white"
+                      placeholder="Legal account holder name"
+                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 ring-1 ring-white/15 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
                   </div>
                   <div>
@@ -2294,7 +2402,22 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
                       type="text"
                       value={payoutAccountNumber}
                       onChange={e => setPayoutAccountNumber(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/15 text-xs text-white font-mono"
+                      placeholder="Enter account number"
+                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 ring-1 ring-white/15 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-white block mb-1">Confirm Account Number *</label>
+                    <input
+                      type="text"
+                      value={payoutConfirmAccountNumber}
+                      onChange={e => setPayoutConfirmAccountNumber(e.target.value)}
+                      placeholder="Re-enter account number"
+                      className={`w-full px-3.5 py-2 rounded-xl bg-black/40 text-xs text-white font-mono focus:outline-none ${
+                        payoutConfirmAccountNumber && payoutConfirmAccountNumber.trim() !== payoutAccountNumber.trim()
+                          ? 'ring-2 ring-red-500'
+                          : 'ring-1 ring-white/15 focus:ring-2 focus:ring-amber-400'
+                      }`}
                     />
                   </div>
                   <div>
@@ -2303,10 +2426,35 @@ export const CreateEventStudio: React.FC<CreateEventStudioProps> = ({
                       type="text"
                       value={payoutBranchCode}
                       onChange={e => setPayoutBranchCode(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/15 text-xs text-white font-mono"
+                      placeholder="Optional"
+                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 ring-1 ring-white/15 text-xs text-white font-mono focus:outline-none"
                     />
                   </div>
+                  <div>
+                    <label className="text-xs font-bold text-white block mb-1">Account Type</label>
+                    <select
+                      value={payoutAccountType}
+                      onChange={e => setPayoutAccountType(e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 ring-1 ring-white/15 text-xs text-white focus:outline-none"
+                    >
+                      <option value="Business Cheque">Business Cheque</option>
+                      <option value="Corporate Current">Corporate Current</option>
+                      <option value="Corporate Savings">Corporate Savings</option>
+                      <option value="Trust Account">Trust Account</option>
+                    </select>
+                  </div>
                 </div>
+                <label className="p-3 rounded-xl bg-black/30 ring-1 ring-white/10 flex items-start gap-2.5 cursor-pointer text-xs text-white/90">
+                  <input
+                    type="checkbox"
+                    checked={payoutBankConfirmed}
+                    onChange={e => setPayoutBankConfirmed(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-amber-500 cursor-pointer"
+                  />
+                  <span>
+                    I confirm these settlement bank account details are accurate to receive ticket payments.
+                  </span>
+                </label>
               </div>
 
               {/* Stripe-style Financial Ledger Summary */}

@@ -53,7 +53,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [referralCopied, setReferralCopied] = useState(false);
 
   // Payment Selection
-  const [paymentProvider, setPaymentProvider] = useState<'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'sandbox'>('sandbox');
+  const [paymentProvider, setPaymentProvider] = useState<'paystack' | 'flutterwave' | 'mpesa' | 'ozow'>('paystack');
+  const [momoChannel, setMomoChannel] = useState<'M-Pesa' | 'MTN MoMo' | 'Airtel Money'>('M-Pesa');
   const [mpesaNumber, setMpesaNumber] = useState('');
   const [cardNumber, setCardNumber] = useState('');
 
@@ -151,25 +152,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setProcessingStatus('Connecting to payment clearing network...');
     await new Promise(r => setTimeout(r, 600));
 
-    if (paymentProvider === 'mpesa') {
-      setProcessingStatus(`Sending Daraja STK Push to ${mpesaNumber}...`);
+    if (paymentProvider === 'mpesa' || paymentProvider === 'flutterwave') {
+      setProcessingStatus(`Sending ${momoChannel} payment prompt to ${mpesaNumber || phone}...`);
       await new Promise(r => setTimeout(r, 800));
     } else if (paymentProvider === 'ozow') {
-      setProcessingStatus('Verifying Instant EFT authorization with South African bank...');
+      setProcessingStatus('Verifying Instant EFT bank authorization...');
       await new Promise(r => setTimeout(r, 800));
     } else {
       setProcessingStatus('Verifying 3D-Secure transaction authorization...');
       await new Promise(r => setTimeout(r, 700));
     }
 
-    setProcessingStatus('Issuing cryptographically signed tickets & updating ledger...');
+    setProcessingStatus('Crediting Organizer Nexora Wallet & issuing cryptographic passes...');
     await new Promise(r => setTimeout(r, 700));
 
     // Authoritative backend call in store
     const finalizeRes = store.finalizeOrderPayment(
       order.id,
       paymentProvider,
-      paymentProvider === 'mpesa' ? 'M-Pesa STK Push' : paymentProvider === 'ozow' ? 'Instant EFT' : 'Sandbox Card'
+      paymentProvider === 'mpesa'
+        ? 'M-Pesa'
+        : paymentProvider === 'flutterwave'
+          ? momoChannel
+          : paymentProvider === 'ozow'
+            ? 'Instant EFT'
+            : 'Bank Card'
     );
 
     if (finalizeRes.success && finalizeRes.tickets.length > 0) {
@@ -430,31 +437,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               {/* Payment Methods Options */}
               <div className="space-y-2.5">
                 
-                {/* Instant Sandbox Fast-Track (Recommended for testing) */}
-                <label className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${
-                  paymentProvider === 'sandbox' ? 'bg-[#F8F7F4] border-[#F6A623]' : 'border-[#E5E7EB]'
-                }`}>
-                  <input
-                    type="radio"
-                    name="paymentProvider"
-                    checked={paymentProvider === 'sandbox'}
-                    onChange={() => setPaymentProvider('sandbox')}
-                    className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-[#111827]">Instant Sandbox Gateway</span>
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.2 rounded font-mono">
-                        Instant Test Mode
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#6B7280] mt-0.5">
-                      Fast-track test settlement verifying full ledger credit, webhook confirmation & QR issuance without real charges.
-                    </p>
-                  </div>
-                </label>
-
-                {/* South Africa: Ozow Instant EFT / Capitec Pay */}
+                {/* Instant EFT */}
                 <label className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${
                   paymentProvider === 'ozow' ? 'bg-[#F8F7F4] border-[#F6A623]' : 'border-[#E5E7EB]'
                 }`}>
@@ -467,8 +450,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-[#111827]">Instant EFT & Capitec Pay</span>
-                      <span className="text-xs text-[#9CA3AF]">ZA · South Africa</span>
+                      <span className="text-sm font-bold text-[#111827]">Instant EFT</span>
                     </div>
                     <p className="text-xs text-[#6B7280] mt-0.5">
                       FNB, Standard Bank, Capitec, Nedbank, Absa direct account settlement.
@@ -476,41 +458,67 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </div>
                 </label>
 
-                {/* Kenya: M-Pesa Express */}
-                <label className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${
-                  paymentProvider === 'mpesa' ? 'bg-[#F8F7F4] border-[#F6A623]' : 'border-[#E5E7EB]'
+                {/* Mobile Money (M-Pesa, MTN MoMo, Airtel Money) */}
+                <div className={`p-3.5 rounded-xl border transition-colors ${
+                  paymentProvider === 'mpesa' || paymentProvider === 'flutterwave' ? 'bg-[#F8F7F4] border-[#F6A623]' : 'border-[#E5E7EB]'
                 }`}>
-                  <input
-                    type="radio"
-                    name="paymentProvider"
-                    checked={paymentProvider === 'mpesa'}
-                    onChange={() => setPaymentProvider('mpesa')}
-                    className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Smartphone className="w-4 h-4 text-emerald-600" />
-                      <span className="text-sm font-bold text-[#111827]">M-Pesa Express (STK Push)</span>
-                      <span className="text-xs text-[#9CA3AF]">KE · Kenya / East Africa</span>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="paymentProvider"
+                      checked={paymentProvider === 'mpesa' || paymentProvider === 'flutterwave'}
+                      onChange={() => {
+                        setMomoChannel('M-Pesa');
+                        setPaymentProvider('mpesa');
+                      }}
+                      className="mt-1 text-[#F6A623] focus:ring-[#F6A623]"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Smartphone className="w-4 h-4 text-emerald-600" />
+                        <span className="text-sm font-bold text-[#111827]">Mobile Money</span>
+                      </div>
+                      <p className="text-xs text-[#6B7280] mt-0.5">
+                        M-Pesa, MTN MoMo & Airtel Money mobile wallet authorization.
+                      </p>
                     </div>
-                    <p className="text-xs text-[#6B7280] mt-0.5">
-                      Direct prompt sent to Safaricom mobile device for PIN confirmation.
-                    </p>
-                    {paymentProvider === 'mpesa' && (
-                      <div className="mt-2.5">
+                  </label>
+                  {(paymentProvider === 'mpesa' || paymentProvider === 'flutterwave') && (
+                    <div className="mt-3 pl-7 space-y-2.5">
+                      <div className="flex flex-wrap gap-2">
+                        {(['M-Pesa', 'MTN MoMo', 'Airtel Money'] as const).map(ch => (
+                          <button
+                            key={ch}
+                            type="button"
+                            onClick={() => {
+                              setMomoChannel(ch);
+                              setPaymentProvider(ch === 'M-Pesa' ? 'mpesa' : 'flutterwave');
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                              momoChannel === ch
+                                ? 'bg-[#111827] text-white'
+                                : 'bg-white border border-[#D1D5DB] text-[#374151]'
+                            }`}
+                          >
+                            {ch}
+                          </button>
+                        ))}
+                      </div>
+                      <div>
                         <label className="block text-[11px] font-medium text-[#4B5563] mb-1">
-                          Safaricom Phone Number (254...)
+                          {momoChannel} Mobile Number
                         </label>
                         <input
                           type="tel"
                           value={mpesaNumber}
                           onChange={e => setMpesaNumber(e.target.value)}
+                          placeholder={momoChannel === 'M-Pesa' ? '+254 712 345 678' : '+233 24 000 0000'}
                           className="w-full max-w-xs px-3 py-1.5 text-xs bg-white border border-[#D1D5DB] rounded font-mono"
                         />
                       </div>
-                    )}
-                  </div>
-                </label>
+                    </div>
+                  )}
+                </div>
 
                 {/* International Cards & Paystack / Flutterwave */}
                 <label className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${

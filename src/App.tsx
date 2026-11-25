@@ -16,6 +16,9 @@ import { store } from './lib/store';
 import { supabase, isSupabaseConfigured, supabaseSignOut } from './lib/supabase';
 import { sanitizeText, clearAdminSessionToken } from './lib/security';
 import { Event, Ticket, AuthUser } from './types';
+import { NexoraMapsProvider } from './components/maps/NexoraMapsProvider';
+import { NexoraVenueMap } from './components/maps/NexoraVenueMap';
+import { SearchIntelCard } from './components/maps/GroundedIntelligencePanel';
 import { 
   ShieldCheck, 
   Smartphone, 
@@ -119,6 +122,17 @@ export default function App() {
   const [selectedCity, setSelectedCity] = useState('All Cities');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedFormat, setSelectedFormat] = useState<string>('All');
+  const [catalogViewMode, setCatalogViewMode] = useState<'grid' | 'map'>('grid');
+  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
+
+  // Top-level Case A Demo Key quota listener (persists across child unmounts)
+  useEffect(() => {
+    const handleQuotaExceeded = () => setMapsQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+    return () => {
+      window.removeEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+    };
+  }, []);
 
   // IntersectionObserver to reveal texts on scroll-down and disappear on scroll-up
   useEffect(() => {
@@ -344,9 +358,26 @@ export default function App() {
   const isDark = theme === 'dark';
 
   return (
+    <NexoraMapsProvider>
     <div className={`min-h-screen flex flex-col transition-colors duration-200 ${
       isDark ? 'bg-black text-white' : 'bg-white text-black'
     }`}>
+      {mapsQuotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-semibold text-amber-950 hover:text-amber-800"
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
       
       {/* Top Bar Navigation (shown on Public Marketplace, Scanner, Admin) */}
       {activeView !== 'organizer' && (
@@ -513,8 +544,36 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* Format Filter Segment */}
-                <div className="flex items-center gap-2 shrink-0">
+                {/* Format Filter Segment & Grid/Map Switcher */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <div className={`flex items-center gap-1 p-1 rounded-lg border ${
+                    isDark ? 'bg-[#101012] border-white/20' : 'bg-neutral-100 border-black/15'
+                  }`}>
+                    <button
+                      type="button"
+                      onClick={() => setCatalogViewMode('grid')}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                        catalogViewMode === 'grid'
+                          ? (isDark ? 'bg-white text-black font-bold' : 'bg-black text-white font-bold')
+                          : (isDark ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black')
+                      }`}
+                    >
+                      Grid
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCatalogViewMode('map')}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 ${
+                        catalogViewMode === 'map'
+                          ? (isDark ? 'bg-white text-black font-bold' : 'bg-black text-white font-bold')
+                          : (isDark ? 'text-white/60 hover:text-white' : 'text-black/60 hover:text-black')
+                      }`}
+                    >
+                      <MapPin className="w-3 h-3" />
+                      <span>Map</span>
+                    </button>
+                  </div>
+
                   <div className={`flex items-center gap-1 p-1 rounded-lg border ${
                     isDark ? 'bg-[#101012] border-white/20' : 'bg-neutral-100 border-black/15'
                   }`}>
@@ -552,8 +611,21 @@ export default function App() {
 
               </div>
 
-              {/* Event Cards Grid */}
-              {filteredEvents.length === 0 ? (
+              {/* Event Cards Grid or Interactive Google Map */}
+              {catalogViewMode === 'map' ? (
+                <NexoraVenueMap
+                  mode="catalog"
+                  events={filteredEvents}
+                  currentCurrency={currency}
+                  heightClassName="h-[460px] sm:h-[520px]"
+                  theme={theme}
+                  onSelectEvent={(e) => {
+                    setInspectEvent(e);
+                    setActiveView('event');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                />
+              ) : filteredEvents.length === 0 ? (
                 <div className={`py-20 text-center space-y-4 rounded-2xl border ${
                   isDark ? 'bg-[#0B0B0E] border-white/15 text-white' : 'bg-neutral-50 border-black/15 text-black'
                 }`}>
@@ -600,6 +672,17 @@ export default function App() {
                   ))}
                 </div>
               )}
+
+              {/* Live Web Event Intelligence powered by Google Search */}
+              <div className="pt-4">
+                <SearchIntelCard
+                  initialQuery={searchQuery || (selectedCity !== 'All Cities' ? `upcoming concerts festivals conferences ${selectedCity}` : 'major music festivals tech conferences Africa 2026')}
+                  category="marketplace_pulse"
+                  title="Live Web Event Discovery (Google Search)"
+                  subtitle="Search real-time festival announcements, tour schedules, and venue updates from across the web."
+                  theme={theme}
+                />
+              </div>
 
             </section>
 
@@ -1752,7 +1835,7 @@ export default function App() {
         {/* VIEW 5: EVENT DETAILS WEBPAGE */}
         {activeView === 'event' && inspectEvent && (
           <EventDetailsPage
-            event={inspectEvent}
+            event={events.find(e => e.id === inspectEvent.id) || inspectEvent}
             onBack={() => {
               setActiveView('marketplace');
               window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1772,7 +1855,7 @@ export default function App() {
         {/* VIEW 6: CHECKOUT WEBPAGE */}
         {activeView === 'checkout' && checkoutEvent && checkoutItems.length > 0 && (
           <CheckoutPage
-            event={checkoutEvent}
+            event={events.find(e => e.id === checkoutEvent.id) || checkoutEvent}
             selectedItems={checkoutItems}
             currentUser={currentUser}
             onBack={() => {
@@ -1879,5 +1962,6 @@ export default function App() {
       )}
 
     </div>
+    </NexoraMapsProvider>
   );
 }

@@ -1202,6 +1202,51 @@ class NexoraStore {
     return created;
   }
 
+  public getServiceFeeRate(): number {
+    return 0.035;
+  }
+
+  public calculateOrderSummary(
+    items: Array<{ tierId: string; quantity: number }>,
+    eventId: string,
+    promoCode?: string
+  ): {
+    subtotalMinor: number;
+    discountMinor: number;
+    feeMinor: number;
+    totalMinor: number;
+    discountPct: number;
+  } {
+    const event = this.getEventById(eventId);
+    if (!event) {
+      return { subtotalMinor: 0, discountMinor: 0, feeMinor: 0, totalMinor: 0, discountPct: 0 };
+    }
+
+    let subtotalMinor = 0;
+    for (const item of items) {
+      const tier = event.tickets.find(t => t.id === item.tierId);
+      if (tier && item.quantity > 0) {
+        subtotalMinor += tier.priceMinor * item.quantity;
+      }
+    }
+
+    let discountMinor = 0;
+    let discountPct = 0;
+    if (promoCode) {
+      const promo = this.validatePromoCode(promoCode, event.id);
+      if (promo) {
+        discountPct = promo.discountPercentage;
+        discountMinor = Math.round((subtotalMinor * promo.discountPercentage) / 100);
+      }
+    }
+
+    const netSubtotal = Math.max(0, subtotalMinor - discountMinor);
+    const feeMinor = netSubtotal > 0 ? Math.round(netSubtotal * this.getServiceFeeRate()) : 0;
+    const totalMinor = Math.max(0, netSubtotal + feeMinor);
+
+    return { subtotalMinor, discountMinor, feeMinor, totalMinor, discountPct };
+  }
+
   // Inventory & Orders
   public createOrder(orderInput: {
     eventId: string;
@@ -1210,6 +1255,7 @@ class NexoraStore {
     customerPhone: string;
     items: Array<{ tierId: string; quantity: number }>;
     promoCode?: string;
+    customAnswers?: Record<string, string>;
   }): { order: Order; success: boolean; error?: string } {
     const event = this.getEventById(orderInput.eventId);
     if (!event) return { order: null as any, success: false, error: 'Event not found' };
@@ -1265,8 +1311,26 @@ class NexoraStore {
       }
     }
 
-    const feeMinor = subtotalMinor > 0 ? Math.round((subtotalMinor - discountMinor) * 0.035) : 0;
-    const totalMinor = Math.max(0, subtotalMinor - discountMinor + feeMinor);
+    const netSubtotal = Math.max(0, subtotalMinor - discountMinor);
+    const feeMinor = netSubtotal > 0 ? Math.round(netSubtotal * this.getServiceFeeRate()) : 0;
+    const totalMinor = Math.max(0, netSubtotal + feeMinor);
+
+    const paymentGate = this.canOrganizerReceivePayment(event, totalMinor);
+    if (!paymentGate.allowed) {
+      return {
+        order: null as any,
+        success: false,
+        error:
+          paymentGate.reason ||
+          'This organizer must add and confirm their bank account details before receiving ticket payments.',
+      };
+    }
+
+    const sanitizedAnswers = orderInput.customAnswers
+      ? Object.fromEntries(
+          Object.entries(orderInput.customAnswers).map(([k, v]) => [sanitizeText(k, 80), sanitizeText(v, 300)])
+        )
+      : undefined;
 
     const orderId = generateUniqueId('ord');
     const orderReference = generateOrderReference();
@@ -1291,6 +1355,7 @@ class NexoraStore {
       paymentProvider: 'sandbox',
       transactionReference: generateTransactionReference(),
       promoCodeApplied: orderInput.promoCode,
+      customAnswers: sanitizedAnswers,
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     };
@@ -1317,6 +1382,17 @@ class NexoraStore {
 
     const event = this.getEventById(order.eventId);
     if (!event) return { success: false, tickets: [], error: 'Associated event not found' };
+
+    const paymentGate = this.canOrganizerReceivePayment(event, order.totalMinor);
+    if (!paymentGate.allowed) {
+      return {
+        success: false,
+        tickets: [],
+        error:
+          paymentGate.reason ||
+          'This organizer must add and confirm their bank account details before receiving ticket payments.',
+      };
+    }
 
     // Atomic capacity re-validation before deducting inventory
     for (const item of order.items) {
@@ -1374,6 +1450,7 @@ class NexoraStore {
           priceMinor: item.unitPriceMinor,
           currency: order.currency,
           status: 'valid',
+          customAnswers: order.customAnswers,
           qrPayload: JSON.stringify({
             code: ticketCode,
             eventId: event.id,
@@ -1417,7 +1494,7 @@ class NexoraStore {
         debitMinor: 0,
         creditMinor: organizerProceeds,
         currency: order.currency,
-        description: `Net ticket revenue allocated to organizer for Order #${order.orderReference}`,
+        description: `Ticket proceeds credited to Organizer Nexora Wallet for Order #${order.orderReference} (withdrawable after event ends)`,
         timestamp,
       },
       {
@@ -1820,6 +1897,96 @@ class NexoraStore {
     return this.ledger.filter(l => l.organizerId === organizerId);
   }
 
+  public isEventCompleted(event?: Event | null): boolean {
+    if (!event) return false;
+    if (event.status === 'cancelled' || event.status === 'draft') return false;
+    if (event.status === 'ended') return true;
+    const referenceDate = event.endDate || event.startDate;
+    const endMs = Date.parse(referenceDate);
+    return !Number.isNaN(endMs) && endMs <= Date.now();
+  }
+
+  public getOrganizerWithdrawalEligibility(organizerId: string): {
+    hasConfirmedBank: boolean;
+    hasPassedEvent: boolean;
+    hasUnlockedFunds: boolean;
+    canWithdraw: boolean;
+    lockedReason: string | null;
+    availablePayoutMinor: number;
+    escrowLockedMinor: number;
+    walletBalanceMinor: number;
+    completedFundedEventsCount: number;
+    upcomingFundedEventsCount: number;
+    nextUnlockEvent: {
+      eventId: string;
+      eventTitle: string;
+      endDate: string;
+      netWalletMinor: number;
+      currency: string;
+    } | null;
+  } {
+    const balance = this.getOrganizerBalance(organizerId);
+    const hasConfirmedBank = this.hasConfirmedBankDetails(organizerId);
+    const orgEvents = this.events.filter(
+      e => e.organizer.id === organizerId && e.status !== 'cancelled' && e.status !== 'draft'
+    );
+    const completedHoldings = balance.eventHoldings.filter(h => h.isCompleted);
+    const lockedHoldings = balance.eventHoldings
+      .filter(h => !h.isCompleted && h.status !== 'cancelled')
+      .sort((a, b) => Date.parse(a.endDate || '') - Date.parse(b.endDate || ''));
+
+    const hasPassedEvent =
+      completedHoldings.length > 0 || orgEvents.some(e => this.isEventCompleted(e));
+    const hasUnlockedFunds = balance.availablePayoutMinor > 0;
+    const nextLocked = lockedHoldings[0] || null;
+    const canWithdraw = hasConfirmedBank && hasPassedEvent && hasUnlockedFunds;
+
+    let lockedReason: string | null = null;
+    if (!hasConfirmedBank) {
+      lockedReason = 'Add and confirm your bank account details in Bank Details before withdrawing funds.';
+    } else if (!hasPassedEvent) {
+      if (nextLocked) {
+        const formatted = nextLocked.endDate
+          ? new Date(nextLocked.endDate).toLocaleDateString('en-ZA', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            })
+          : 'completion';
+        lockedReason = `Locked until "${nextLocked.eventTitle}" ends on ${formatted}.`;
+      } else {
+        lockedReason = 'Withdrawals unlock automatically after your event date has passed.';
+      }
+    } else if (!hasUnlockedFunds) {
+      lockedReason =
+        balance.escrowLockedMinor > 0 && nextLocked
+          ? `Upcoming event funds remain held until "${nextLocked.eventTitle}" concludes.`
+          : 'No unlocked post-event funds available to withdraw yet.';
+    }
+
+    return {
+      hasConfirmedBank,
+      hasPassedEvent,
+      hasUnlockedFunds,
+      canWithdraw,
+      lockedReason,
+      availablePayoutMinor: balance.availablePayoutMinor,
+      escrowLockedMinor: balance.escrowLockedMinor,
+      walletBalanceMinor: balance.walletBalanceMinor,
+      completedFundedEventsCount: completedHoldings.length,
+      upcomingFundedEventsCount: lockedHoldings.length,
+      nextUnlockEvent: nextLocked
+        ? {
+            eventId: nextLocked.eventId,
+            eventTitle: nextLocked.eventTitle,
+            endDate: nextLocked.endDate,
+            netWalletMinor: nextLocked.netWalletMinor,
+            currency: nextLocked.currency,
+          }
+        : null,
+    };
+  }
+
   public getOrganizerBalance(organizerId: string) {
     const entries = this.getLedgerEntries(organizerId);
     let grossMinor = 0;
@@ -1827,25 +1994,105 @@ class NexoraStore {
     let payoutsCompletedMinor = 0;
     let refundsReversedMinor = 0;
 
+    const perEventMap = new Map<
+      string,
+      { creditedMinor: number; reversedMinor: number; currency: string }
+    >();
+
     for (const entry of entries) {
       if (entry.type === 'organizer_payable') {
         grossMinor += entry.creditMinor;
+        const key = entry.eventId || '__unassigned__';
+        const prev = perEventMap.get(key) || {
+          creditedMinor: 0,
+          reversedMinor: 0,
+          currency: entry.currency || 'ZAR',
+        };
+        prev.creditedMinor += entry.creditMinor;
+        perEventMap.set(key, prev);
       } else if (entry.type === 'platform_commission') {
         platformFeeMinor += entry.creditMinor;
       } else if (entry.type === 'payout_transfer') {
         payoutsCompletedMinor += entry.debitMinor;
       } else if (entry.type === 'refund_reversal') {
         refundsReversedMinor += entry.debitMinor;
+        const key = entry.eventId || '__unassigned__';
+        const prev = perEventMap.get(key) || {
+          creditedMinor: 0,
+          reversedMinor: 0,
+          currency: entry.currency || 'ZAR',
+        };
+        prev.reversedMinor += entry.debitMinor;
+        perEventMap.set(key, prev);
       }
     }
 
-    const availablePayoutMinor = Math.max(0, grossMinor - refundsReversedMinor - payoutsCompletedMinor);
+    let unlockedGrossMinor = 0;
+    let escrowLockedMinor = 0;
+    const eventHoldings: Array<{
+      eventId: string;
+      eventTitle: string;
+      endDate: string;
+      currency: string;
+      status: Event['status'];
+      netWalletMinor: number;
+      isCompleted: boolean;
+      unlockLabel: string;
+    }> = [];
+
+    for (const [eventId, totals] of perEventMap.entries()) {
+      const netWalletMinor = Math.max(0, totals.creditedMinor - totals.reversedMinor);
+      if (netWalletMinor <= 0) continue;
+
+      const evt = eventId !== '__unassigned__' ? this.getEventById(eventId) : undefined;
+      const completed = this.isEventCompleted(evt);
+
+      if (completed) {
+        unlockedGrossMinor += netWalletMinor;
+      } else {
+        escrowLockedMinor += netWalletMinor;
+      }
+
+      const formattedEnd = evt?.endDate
+        ? new Date(evt.endDate).toLocaleDateString('en-ZA', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          })
+        : 'TBD';
+
+      eventHoldings.push({
+        eventId,
+        eventTitle: evt?.title || 'Event Settlement',
+        endDate: evt?.endDate || '',
+        currency: evt?.currency || totals.currency,
+        status: evt?.status || 'published',
+        netWalletMinor,
+        isCompleted: completed,
+        unlockLabel:
+          evt?.status === 'cancelled'
+            ? 'Cancelled — Held for Refunds'
+            : completed
+              ? 'Event Completed · Unlocked'
+              : `Locked until ${formattedEnd}`,
+      });
+    }
+
+    const walletBalanceMinor = Math.max(0, grossMinor - refundsReversedMinor - payoutsCompletedMinor);
+    const availablePayoutMinor = Math.min(
+      walletBalanceMinor,
+      Math.max(0, unlockedGrossMinor - payoutsCompletedMinor)
+    );
+
     return {
       grossMinor,
       platformFeeMinor,
       payoutsCompletedMinor,
       refundsReversedMinor,
+      walletBalanceMinor,
+      escrowLockedMinor,
       availablePayoutMinor,
+      eventHoldings,
     };
   }
 
@@ -1855,10 +2102,31 @@ class NexoraStore {
   }
 
   public requestPayout(organizerId: string, amountMinor: number, currency = 'ZAR'): PayoutRequest {
+    const balance = this.getOrganizerBalance(organizerId);
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      throw new Error('Withdrawal amount must be greater than zero.');
+    }
+    if (balance.availablePayoutMinor <= 0) {
+      throw new Error(
+        'Withdrawals are locked until your event ends. All ticket proceeds remain safely held in your Nexora Wallet.'
+      );
+    }
+    if (amountMinor > balance.availablePayoutMinor) {
+      throw new Error(
+        'Requested withdrawal exceeds your unlocked post-event Nexora Wallet balance.'
+      );
+    }
+
     const organizer = this.organizers.find(o => o.id === organizerId);
-    const destination = organizer?.bankDetails 
-      ? `${organizer.bankDetails.bankName} ••••${organizer.bankDetails.accountNumber.slice(-4)}`
-      : 'Primary Verified Account';
+    const bankName = organizer?.bankDetails?.bankName?.trim();
+    const accountNumber = organizer?.bankDetails?.accountNumber?.trim();
+    if (!bankName || !accountNumber || !this.hasConfirmedBankDetails(organizerId)) {
+      throw new Error(
+        'Add and confirm your settlement bank account details in Nexora Wallet or Organizer Profile before withdrawing funds.'
+      );
+    }
+
+    const destination = `${bankName} ••••${accountNumber.slice(-4)}`;
 
     const req: PayoutRequest = {
       id: 'pay-' + Date.now(),
@@ -1881,11 +2149,18 @@ class NexoraStore {
       debitMinor: amountMinor,
       creditMinor: 0,
       currency,
-      description: `Settled payout transfer to ${destination}`,
+      description: `Nexora Wallet withdrawal to ${destination}`,
       timestamp: new Date().toISOString(),
     };
     this.ledger.unshift(payoutLedgerEntry);
     saveToStorage('ledger', this.ledger);
+
+    this.logActivity({
+      type: 'purchase',
+      title: 'Organizer Wallet Withdrawal',
+      description: `Withdrew ${currency} ${(amountMinor / 100).toFixed(2)} from Nexora Wallet to ${destination}`,
+      actor: organizer?.name || 'Organizer',
+    });
 
     return req;
   }
@@ -2009,18 +2284,90 @@ class NexoraStore {
     return this.organizers.find(o => o.id === organizerId);
   }
 
+  public hasConfirmedBankDetails(organizerId: string): boolean {
+    const org = this.organizers.find(o => o.id === organizerId);
+    if (!org) return false;
+    const bankName = org.bankDetails?.bankName?.trim() || '';
+    const accountHolder = org.bankDetails?.accountHolder?.trim() || '';
+    const accountNumber = org.bankDetails?.accountNumber?.trim() || '';
+    const isConfirmed = org.bankDetails?.confirmed === true;
+    return Boolean(bankName.length >= 2 && accountHolder.length >= 2 && accountNumber.length >= 5 && isConfirmed);
+  }
+
+  public canOrganizerReceivePayment(
+    event?: Event | null,
+    totalMinor?: number
+  ): { allowed: boolean; reason?: string } {
+    if (!event) {
+      return { allowed: false, reason: 'Event record not found.' };
+    }
+    if (typeof totalMinor === 'number' && totalMinor <= 0) {
+      return { allowed: true };
+    }
+    if (typeof totalMinor !== 'number') {
+      const hasPaidTier = event.tickets.some(t => t.priceMinor > 0);
+      if (!hasPaidTier) return { allowed: true };
+    }
+
+    const org = this.organizers.find(o => o.id === event.organizer.id);
+    if (org) {
+      if (!this.hasConfirmedBankDetails(org.id)) {
+        return {
+          allowed: false,
+          reason:
+            'Ticket payments are paused until the organizer adds and confirms their settlement bank account details.',
+        };
+      }
+      return { allowed: true };
+    }
+
+    if (SHOWCASE_EVENT_IDS.has(event.id)) {
+      return { allowed: true };
+    }
+
+    const hasEventPayout = Boolean(
+      event.payoutSettings?.bankName?.trim() &&
+        event.payoutSettings?.accountNumber?.trim().length >= 5 &&
+        (event.payoutSettings?.accountHolder?.trim() || event.organizer.name)
+    );
+    if (!hasEventPayout) {
+      return {
+        allowed: false,
+        reason:
+          'Ticket payments are paused until the organizer adds and confirms their settlement bank account details.',
+      };
+    }
+
+    return { allowed: true };
+  }
+
   public updateOrganizerProfile(organizerId: string, updates: Partial<OrganizerProfile>): OrganizerProfile | null {
     const idx = this.organizers.findIndex(o => o.id === organizerId);
     if (idx === -1) return null;
     
     const existing = this.organizers[idx];
+    const nextBankDetails = updates.bankDetails
+      ? {
+          ...existing.bankDetails,
+          ...updates.bankDetails,
+          confirmed:
+            updates.bankDetails.confirmed ??
+            Boolean(
+              updates.bankDetails.bankName?.trim() &&
+                updates.bankDetails.accountHolder?.trim() &&
+                updates.bankDetails.accountNumber?.trim().length >= 5
+            ),
+          confirmedAt:
+            updates.bankDetails.confirmed || updates.bankDetails.confirmed === undefined
+              ? updates.bankDetails.confirmedAt || new Date().toISOString()
+              : undefined,
+        }
+      : existing.bankDetails;
+
     const updated: OrganizerProfile = {
       ...existing,
       ...updates,
-      bankDetails: {
-        ...existing.bankDetails,
-        ...(updates.bankDetails || {})
-      },
+      bankDetails: nextBankDetails,
       socialLinks: {
         ...(existing.socialLinks || {}),
         ...(updates.socialLinks || {})
@@ -2029,6 +2376,38 @@ class NexoraStore {
     
     this.organizers[idx] = updated;
     saveToStorage('organizers', this.organizers);
+
+    if (updates.bankDetails?.accountNumber) {
+      const bankChanged =
+        updates.bankDetails.bankName !== existing.bankDetails?.bankName ||
+        updates.bankDetails.accountNumber !== existing.bankDetails?.accountNumber ||
+        updates.bankDetails.accountHolder !== existing.bankDetails?.accountHolder ||
+        updates.bankDetails.confirmed !== existing.bankDetails?.confirmed;
+      if (bankChanged && nextBankDetails.confirmed) {
+        this.events = this.events.map(ev =>
+          ev.organizer.id === organizerId
+            ? {
+                ...ev,
+                payoutSettings: {
+                  bankName: nextBankDetails.bankName,
+                  accountNumber: nextBankDetails.accountNumber,
+                  accountHolder: nextBankDetails.accountHolder,
+                  currency: ev.currency,
+                },
+              }
+            : ev
+        );
+        saveToStorage('events', this.events);
+
+        const masked = `••••${nextBankDetails.accountNumber.slice(-4)}`;
+        this.logActivity({
+          type: 'profile',
+          title: 'Settlement Bank Details Confirmed',
+          description: `${updated.name} confirmed payout account ${nextBankDetails.bankName} (${masked})`,
+          actor: updated.name,
+        });
+      }
+    }
 
     // If name changed, update the events where this organizer is assigned so events display the new name
     if (updates.name && updates.name !== existing.name) {
@@ -2354,6 +2733,7 @@ class NexoraStore {
         accountHolder: user.name || '',
         branchCode: '',
         accountType: 'Business Cheque',
+        confirmed: false,
       },
     };
     this.organizers.unshift(created);

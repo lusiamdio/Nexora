@@ -55,7 +55,9 @@ import {
   CheckSquare,
   Percent,
   ExternalLink,
-  ChevronDown
+  ChevronDown,
+  Wallet,
+  Lock
 } from 'lucide-react';
 import { 
   Event, 
@@ -89,8 +91,10 @@ import { EditEventPage } from './EditEventPage';
 import { OrganizerProfilePage } from './OrganizerProfilePage';
 import { EditOrganizerProfileModal } from './EditOrganizerProfileModal';
 import { IntegrationsManager } from './IntegrationsManager';
+import { BankDetailsSection } from './BankDetailsSection';
 import { WaitlistReclamationDrawer } from '../admin/WaitlistReclamationDrawer';
 import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
+import { requestOrganizerPayoutInSupabase } from '../../lib/supabase';
 
 interface OrganizerPortalProps {
   currentUser?: AuthUser | null;
@@ -107,13 +111,17 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
   onLaunchScanner,
   onOpenAuth,
 }) => {
-  // Navigation: 7 Enterprise Modules
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'events' | 'attendees' | 'venues_agenda' | 'marketing_analytics' | 'integrations' | 'profile'>('dashboard');
+  // Navigation: Enterprise Modules
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'events' | 'attendees' | 'venues_agenda' | 'marketing_analytics' | 'wallet' | 'bank_details' | 'integrations' | 'profile'>('dashboard');
   const [engagementSubTab, setEngagementSubTab] = useState<'hub' | 'checkin' | 'campaigns' | 'reports' | 'settings'>('hub');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showWaitlistDrawer, setShowWaitlistDrawer] = useState(false);
   const [showCashlessTerminal, setShowCashlessTerminal] = useState(false);
+  const [withdrawAmountInput, setWithdrawAmountInput] = useState('');
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [walletRefreshTick, setWalletRefreshTick] = useState(0);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
 
   // Theme Switching
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
@@ -192,7 +200,101 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
   const allTickets = store.getTickets().filter(t => allEvents.some(e => e.id === t.eventId));
   const orgBalance = currentOrgId
     ? store.getOrganizerBalance(currentOrgId)
-    : { grossMinor: 0, platformFeeMinor: 0, payoutsCompletedMinor: 0, refundsReversedMinor: 0, availablePayoutMinor: 0 };
+    : {
+        grossMinor: 0,
+        platformFeeMinor: 0,
+        payoutsCompletedMinor: 0,
+        refundsReversedMinor: 0,
+        walletBalanceMinor: 0,
+        escrowLockedMinor: 0,
+        availablePayoutMinor: 0,
+        eventHoldings: [],
+      };
+  const orgPayouts = currentOrgId && walletRefreshTick >= 0 ? store.getPayouts(currentOrgId) : [];
+  const hasConfirmedBank = currentOrgId ? store.hasConfirmedBankDetails(currentOrgId) : false;
+  const withdrawalEligibility = currentOrgId && walletRefreshTick >= 0
+    ? store.getOrganizerWithdrawalEligibility(currentOrgId)
+    : null;
+  const walletCurrency = orgBalance.eventHoldings[0]?.currency || allEvents[0]?.currency || 'ZAR';
+  const walletIsZeroDecimal = walletCurrency === 'RWF';
+
+  const handleWithdrawFromWallet = async (amountMinorOverride?: number) => {
+    if (!currentOrgId || isWithdrawing) return;
+    setWalletError(null);
+
+    const eligibility = store.getOrganizerWithdrawalEligibility(currentOrgId);
+    if (!eligibility.hasConfirmedBank) {
+      const msg = 'Add and confirm your settlement bank account in Bank Details before withdrawing funds.';
+      setWalletError(msg);
+      playAudioFeedback('error');
+      showNotification(msg);
+      return;
+    }
+    if (!eligibility.hasPassedEvent) {
+      const msg = eligibility.lockedReason || 'Withdrawals unlock only after the event end date has passed.';
+      setWalletError(msg);
+      playAudioFeedback('error');
+      showNotification(msg);
+      return;
+    }
+    if (!eligibility.hasUnlockedFunds || eligibility.availablePayoutMinor <= 0) {
+      const msg = eligibility.lockedReason || 'No unlocked post-event wallet funds available to withdraw yet.';
+      setWalletError(msg);
+      playAudioFeedback('error');
+      showNotification(msg);
+      return;
+    }
+
+    const fallbackMajor = walletIsZeroDecimal
+      ? eligibility.availablePayoutMinor
+      : eligibility.availablePayoutMinor / 100;
+    const rawMajor =
+      typeof amountMinorOverride === 'number'
+        ? undefined
+        : withdrawAmountInput.trim()
+          ? Number(withdrawAmountInput)
+          : fallbackMajor;
+    const amountMinor =
+      typeof amountMinorOverride === 'number'
+        ? amountMinorOverride
+        : walletIsZeroDecimal
+          ? Math.round(rawMajor || 0)
+          : Math.round((rawMajor || 0) * 100);
+
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      setWalletError('Enter a valid withdrawal amount greater than zero.');
+      playAudioFeedback('error');
+      return;
+    }
+    if (amountMinor > eligibility.availablePayoutMinor) {
+      setWalletError('Requested withdrawal exceeds your unlocked post-event Nexora Wallet balance.');
+      playAudioFeedback('error');
+      return;
+    }
+
+    setIsWithdrawing(true);
+    try {
+      const remoteRes = await requestOrganizerPayoutInSupabase(currentOrgId, amountMinor, walletCurrency);
+      if (remoteRes.error) {
+        setWalletError(remoteRes.error);
+        playAudioFeedback('error');
+        return;
+      }
+
+      const req = store.requestPayout(currentOrgId, amountMinor, walletCurrency);
+      setWithdrawAmountInput('');
+      setWalletRefreshTick(t => t + 1);
+      playAudioFeedback('success');
+      showNotification(
+        `Withdrew ${formatCurrency(req.amountMinor, req.currency)} to ${req.destinationAccount}.`
+      );
+    } catch (err: any) {
+      setWalletError(err?.message || 'Unable to process withdrawal.');
+      playAudioFeedback('error');
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
   const ledgerEntries = currentOrgId ? store.getLedgerEntries(currentOrgId) : [];
   const refundRequests = currentOrgId ? store.getRefundRequests(currentOrgId) : [];
   const teamMembers = currentOrgId ? store.getTeamMembers(currentOrgId) : [];
@@ -893,7 +995,47 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
               <span>5. Engagement & Analytics</span>
             </button>
 
-            {/* 6. Third-Party Integrations */}
+            {/* 6. Nexora Wallet & Withdrawals */}
+            <button
+              onClick={() => { setActiveSection('wallet'); setMobileSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer text-left ${
+                activeSection === 'wallet'
+                  ? 'bg-white text-black font-bold shadow-xs'
+                  : 'text-[#D1D5DB] hover:bg-[#1F2937] hover:text-white'
+              }`}
+            >
+              <Wallet className="w-4 h-4 shrink-0" />
+              <div className="flex-1 flex items-center justify-between gap-2 min-w-0">
+                <span className="truncate">6. Nexora Wallet</span>
+                <span className="text-[10px] font-mono opacity-80 shrink-0">
+                  {formatCurrency(orgBalance.walletBalanceMinor, walletCurrency)}
+                </span>
+              </div>
+            </button>
+
+            {/* 7. Bank Details */}
+            <button
+              onClick={() => { setActiveSection('bank_details'); setMobileSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer text-left ${
+                activeSection === 'bank_details'
+                  ? 'bg-white text-black font-bold shadow-xs'
+                  : 'text-[#D1D5DB] hover:bg-[#1F2937] hover:text-white'
+              }`}
+            >
+              <CreditCard className="w-4 h-4 shrink-0" />
+              <div className="flex-1 flex items-center justify-between gap-2 min-w-0">
+                <span className="truncate">7. Bank Details</span>
+                <span className={`text-[10px] font-mono font-bold shrink-0 ${
+                  hasConfirmedBank
+                    ? activeSection === 'bank_details' ? 'text-emerald-700' : 'text-emerald-400'
+                    : activeSection === 'bank_details' ? 'text-amber-700' : 'text-amber-400'
+                }`}>
+                  {hasConfirmedBank ? 'Confirmed' : 'Required'}
+                </span>
+              </div>
+            </button>
+
+            {/* 8. Third-Party Integrations */}
             <button
               onClick={() => { setActiveSection('integrations'); setMobileSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer text-left ${
@@ -904,14 +1046,14 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
             >
               <Zap className="w-4 h-4 shrink-0" />
               <div className="flex-1 flex items-center justify-between">
-                <span>6. Platform Integrations</span>
+                <span>8. Platform Integrations</span>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 rounded font-bold">
                   {connectedIntegrationsCount > 0 ? `${connectedIntegrationsCount} Active` : 'Setup'}
                 </span>
               </div>
             </button>
 
-            {/* 7. Organizer Profile */}
+            {/* 9. Organizer Profile */}
             <button
               onClick={() => { setActiveSection('profile'); setMobileSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer text-left ${
@@ -921,7 +1063,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
               }`}
             >
               <Building2 className="w-4 h-4 shrink-0" />
-              <span>7. Organizer Profile</span>
+              <span>9. Organizer Profile</span>
             </button>
           </nav>
         </div>
@@ -1002,7 +1144,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                       Publish a New Pan-African Event
                     </h2>
                     <p className={`text-xs ${isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}`}>
-                      End-to-end studio with live previews, multi-currency ticketing, and instant EFT/M-Pesa settlement.
+                      End-to-end studio with live previews, multi-currency ticketing, and Instant EFT / Mobile Money settlement.
                     </p>
                   </div>
 
@@ -1128,6 +1270,34 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                 </div>
               </div>
 
+              {/* Bank Account Confirmation Requirement Banner */}
+              {!hasConfirmedBank && (
+                <div className={`p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 ring-1 ${
+                  isDarkTheme
+                    ? 'bg-amber-950/35 ring-amber-500/40 text-amber-100'
+                    : 'bg-amber-50 ring-amber-300 text-amber-950'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-bold">
+                        Add & Confirm Your Bank Account to Receive Ticket Payments
+                      </h3>
+                      <p className="text-xs opacity-80">
+                        Organizers must add and confirm a payout bank account before receiving paid ticket settlements or withdrawing Nexora Wallet funds after events end. You can change your banking details anytime.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('bank_details')}
+                    className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs shrink-0 cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Add & Confirm Bank Details
+                  </button>
+                </div>
+              )}
+
               {/* Registration & Revenue KPIs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 
@@ -1138,7 +1308,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     <span>Total Registrations</span>
                     <Users className={`w-4 h-4 ${isDarkTheme ? 'text-white' : 'text-neutral-900'}`} />
                   </div>
-                  <div className="text-2xl font-extrabold font-mono">
+                  <div className="text-2xl font-extrabold font-mono tabular-nums">
                     {allTickets.length}
                   </div>
                   <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280] font-semibold">
@@ -1154,7 +1324,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     <span>Gross Ticket Revenue</span>
                     <DollarSign className="w-4 h-4 text-emerald-500" />
                   </div>
-                  <div className="text-2xl font-extrabold font-mono">
+                  <div className="text-2xl font-extrabold font-mono tabular-nums">
                     {formatCurrency(orgBalance.grossMinor, 'ZAR')}
                   </div>
                   <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280] font-semibold">
@@ -1170,7 +1340,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     <span>Checked-In Admissions</span>
                     <CheckCircle2 className="w-4 h-4 text-blue-500" />
                   </div>
-                  <div className="text-2xl font-extrabold text-blue-500 font-mono">
+                  <div className="text-2xl font-extrabold text-blue-500 font-mono tabular-nums">
                     {checkedInCount}
                   </div>
                   <span className="text-[11px] text-[#6B7280] block font-mono">
@@ -1178,21 +1348,105 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                   </span>
                 </div>
 
-                <div className={`p-5 rounded-xl border shadow-xs space-y-2 ${
-                  isDarkTheme ? 'bg-[#111827] border-[#1F2937]' : 'bg-white border-[#E5E7EB]'
-                }`}>
+                <div
+                  onClick={() => setActiveSection('wallet')}
+                  className={`p-5 rounded-xl border shadow-xs space-y-2 cursor-pointer transition-colors ${
+                    isDarkTheme ? 'bg-[#111827] border-[#1F2937] hover:bg-[#182032]' : 'bg-white border-[#E5E7EB] hover:bg-neutral-50'
+                  }`}
+                >
                   <div className="flex items-center justify-between text-xs text-[#6B7280]">
-                    <span>Eligible Settlement Balance</span>
-                    <CreditCard className={`w-4 h-4 ${isDarkTheme ? 'text-white' : 'text-neutral-900'}`} />
+                    <span>Nexora Wallet Balance</span>
+                    <Wallet className={`w-4 h-4 ${isDarkTheme ? 'text-white' : 'text-neutral-900'}`} />
                   </div>
-                  <div className="text-2xl font-extrabold text-emerald-500 font-mono">
-                    {formatCurrency(orgBalance.availablePayoutMinor, 'ZAR')}
+                  <div className="text-2xl font-extrabold text-emerald-500 font-mono tabular-nums">
+                    {formatCurrency(orgBalance.walletBalanceMinor, walletCurrency)}
                   </div>
                   <span className="text-[11px] text-[#6B7280] block font-mono">
-                    Net proceeds ready for payout
+                    {withdrawalEligibility?.canWithdraw
+                      ? `${formatCurrency(orgBalance.availablePayoutMinor, walletCurrency)} unlocked to withdraw`
+                      : withdrawalEligibility?.hasPassedEvent
+                        ? 'Event date passed · Manage wallet →'
+                        : 'Held until event date passes · Manage →'}
                   </span>
                 </div>
 
+              </div>
+
+              {/* Nexora Wallet Event-Date Withdrawal Gate */}
+              <div className={`p-6 rounded-2xl ring-1 flex flex-col lg:flex-row lg:items-center justify-between gap-5 ${
+                isDarkTheme ? 'bg-[#111827] ring-white/10' : 'bg-white ring-black/10'
+              }`}>
+                <div className="space-y-2 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                    <Wallet className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="font-bold">Nexora Wallet Payout Status</span>
+                    <span className="text-[#6B7280]">·</span>
+                    {withdrawalEligibility?.canWithdraw ? (
+                      <span className="text-emerald-500 font-bold">
+                        Event Date Passed · Unlocked for Withdrawal
+                      </span>
+                    ) : (
+                      <span className="text-amber-500 font-bold">
+                        {!hasConfirmedBank
+                          ? 'Bank Confirmation Required'
+                          : !withdrawalEligibility?.hasPassedEvent
+                            ? 'Locked Until Event Date Passes'
+                            : 'Awaiting Unlocked Proceeds'}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className={`text-xs leading-relaxed ${isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}`}>
+                    {withdrawalEligibility?.canWithdraw
+                      ? `${formatCurrency(orgBalance.availablePayoutMinor, walletCurrency)} from ${withdrawalEligibility.completedFundedEventsCount} completed event(s) is ready to transfer to ${currentOrg.bankDetails.bankName} (••••${currentOrg.bankDetails.accountNumber.slice(-4)}).`
+                      : withdrawalEligibility?.lockedReason || 'Wallet funds remain held safely until your event date passes.'}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono tabular-nums text-[#6B7280]">
+                    <span>
+                      Held: <strong className={isDarkTheme ? 'text-white' : 'text-black'}>{formatCurrency(orgBalance.escrowLockedMinor, walletCurrency)}</strong>
+                    </span>
+                    <span>·</span>
+                    <span>
+                      Withdrawable: <strong className="text-emerald-500">{formatCurrency(orgBalance.availablePayoutMinor, walletCurrency)}</strong>
+                    </span>
+                    <span>·</span>
+                    <span>
+                      Completed Events: <strong className={isDarkTheme ? 'text-white' : 'text-black'}>{withdrawalEligibility?.completedFundedEventsCount || 0}</strong>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('bank_details')}
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+                      isDarkTheme ? 'bg-[#1F2937] hover:bg-[#374151] text-white' : 'bg-neutral-100 hover:bg-neutral-200 text-black'
+                    }`}
+                  >
+                    {hasConfirmedBank ? 'Bank Details' : 'Confirm Bank Details'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('wallet')}
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+                      isDarkTheme ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-white hover:bg-neutral-100 text-black ring-1 ring-black/15'
+                    }`}
+                  >
+                    View Wallet
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!withdrawalEligibility?.canWithdraw || isWithdrawing}
+                    onClick={() => handleWithdrawFromWallet(orgBalance.availablePayoutMinor)}
+                    title={withdrawalEligibility?.lockedReason || 'Withdraw unlocked post-event funds'}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs inline-flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                  >
+                    {withdrawalEligibility?.canWithdraw ? <Wallet className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                    <span>{isWithdrawing ? 'Withdrawing...' : 'Withdraw'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Upcoming Events Row */}
@@ -2599,7 +2853,284 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
           )}
 
           {/* ========================================================= */}
-          {/* 6. THIRD-PARTY PLATFORM INTEGRATIONS                      */}
+          {/* 6. ORGANIZER NEXORA WALLET & POST-EVENT WITHDRAWALS       */}
+          {/* ========================================================= */}
+          {activeSection === 'wallet' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black tracking-tight">Organizer Nexora Wallet</h2>
+                  <p className={`text-xs ${isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}`}>
+                    Ticket proceeds settle immediately into your Nexora Wallet and unlock for bank withdrawal once each event ends.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleExportCSV('ledger')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-2 cursor-pointer ${
+                    isDarkTheme ? 'bg-[#1F2937] text-white hover:bg-[#374151]' : 'bg-neutral-100 text-black hover:bg-neutral-200'
+                  }`}
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export Ledger (.CSV)</span>
+                </button>
+              </div>
+
+              {/* Wallet KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className={`p-5 rounded-2xl space-y-1.5 ${isDarkTheme ? 'bg-[#111827] ring-1 ring-white/10' : 'bg-white ring-1 ring-black/10'}`}>
+                  <span className="text-xs text-[#6B7280] block">Total Nexora Wallet</span>
+                  <div className="text-2xl font-black font-mono tabular-nums">
+                    {formatCurrency(orgBalance.walletBalanceMinor, walletCurrency)}
+                  </div>
+                  <span className="text-[11px] font-mono text-emerald-500 block">Credited on ticket purchase</span>
+                </div>
+
+                <div className={`p-5 rounded-2xl space-y-1.5 ${isDarkTheme ? 'bg-[#111827] ring-1 ring-white/10' : 'bg-white ring-1 ring-black/10'}`}>
+                  <span className="text-xs text-[#6B7280] flex items-center justify-between">
+                    <span>Held Until Event Ends</span>
+                    <Lock className="w-3.5 h-3.5 text-amber-500" />
+                  </span>
+                  <div className="text-2xl font-black font-mono tabular-nums text-amber-500">
+                    {formatCurrency(orgBalance.escrowLockedMinor, walletCurrency)}
+                  </div>
+                  <span className="text-[11px] font-mono text-[#6B7280] block">Active & upcoming event escrow</span>
+                </div>
+
+                <div className={`p-5 rounded-2xl space-y-1.5 ${isDarkTheme ? 'bg-[#111827] ring-1 ring-white/10' : 'bg-white ring-1 ring-black/10'}`}>
+                  <span className="text-xs text-[#6B7280] block">Available to Withdraw</span>
+                  <div className="text-2xl font-black font-mono tabular-nums text-emerald-500">
+                    {formatCurrency(orgBalance.availablePayoutMinor, walletCurrency)}
+                  </div>
+                  <span className="text-[11px] font-mono text-[#6B7280] block">Unlocked from completed events</span>
+                </div>
+
+                <div className={`p-5 rounded-2xl space-y-1.5 ${isDarkTheme ? 'bg-[#111827] ring-1 ring-white/10' : 'bg-white ring-1 ring-black/10'}`}>
+                  <span className="text-xs text-[#6B7280] block">Withdrawn to Bank</span>
+                  <div className="text-2xl font-black font-mono tabular-nums">
+                    {formatCurrency(orgBalance.payoutsCompletedMinor, walletCurrency)}
+                  </div>
+                  <span className="text-[11px] font-mono text-[#6B7280] block">{orgPayouts.length} completed transfer(s)</span>
+                </div>
+              </div>
+
+              {/* Withdrawal Control + Per-Event Release Schedule */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Withdraw Funds Panel */}
+                <div className={`lg:col-span-5 p-6 rounded-2xl space-y-5 ${isDarkTheme ? 'bg-[#111827] ring-1 ring-white/10' : 'bg-white ring-1 ring-black/10'}`}>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold">Withdraw to Bank Account</h3>
+                    <p className={`text-xs ${isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}`}>
+                      Withdrawals are permitted only after the associated event has concluded.
+                    </p>
+                  </div>
+
+                  {walletError && (
+                    <div className="p-3 rounded-xl bg-red-500/10 text-red-500 text-xs font-medium flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{walletError}</span>
+                    </div>
+                  )}
+
+                  <BankDetailsSection
+                    organizer={currentOrg}
+                    isDarkTheme={isDarkTheme}
+                    mode="embedded"
+                    onUpdated={() => {
+                      setOrganizers([...store.getOrganizers()]);
+                      setWalletError(null);
+                      setWalletRefreshTick(t => t + 1);
+                    }}
+                    onNotification={showNotification}
+                  />
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-mono font-bold text-[#9CA3AF]">
+                        Withdrawal Amount ({walletCurrency})
+                      </label>
+                      {withdrawalEligibility?.canWithdraw && orgBalance.availablePayoutMinor > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setWithdrawAmountInput(
+                              walletIsZeroDecimal
+                                ? String(orgBalance.availablePayoutMinor)
+                                : (orgBalance.availablePayoutMinor / 100).toFixed(2)
+                            )
+                          }
+                          className="text-[11px] font-mono underline cursor-pointer text-emerald-500"
+                        >
+                          Max ({formatCurrency(orgBalance.availablePayoutMinor, walletCurrency)})
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      step={walletIsZeroDecimal ? '1' : '0.01'}
+                      disabled={!withdrawalEligibility?.canWithdraw || isWithdrawing}
+                      value={withdrawAmountInput}
+                      onChange={e => {
+                        setWalletError(null);
+                        setWithdrawAmountInput(e.target.value);
+                      }}
+                      placeholder={withdrawalEligibility?.canWithdraw ? (walletIsZeroDecimal ? '0' : '0.00') : 'Locked until event date passes'}
+                      className={`w-full px-4 py-3 rounded-xl text-sm font-mono tabular-nums focus:outline-none disabled:opacity-50 ${
+                        isDarkTheme ? 'bg-black text-white ring-1 ring-white/15' : 'bg-white text-black ring-1 ring-black/15'
+                      }`}
+                    />
+                  </div>
+
+                  {!withdrawalEligibility?.canWithdraw && withdrawalEligibility?.lockedReason && (
+                    <p className="text-[11px] font-mono text-amber-500 leading-relaxed">
+                      {withdrawalEligibility.lockedReason}
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={!withdrawalEligibility?.canWithdraw || isWithdrawing}
+                    onClick={() => handleWithdrawFromWallet()}
+                    className={`w-full py-3.5 px-5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap ${
+                      withdrawalEligibility?.canWithdraw
+                        ? 'bg-emerald-500 hover:bg-emerald-400 text-black'
+                        : isDarkTheme ? 'bg-white text-black' : 'bg-black text-white'
+                    }`}
+                  >
+                    {!hasConfirmedBank ? (
+                      <>
+                        <AlertTriangle className="w-4 h-4" />
+                        <span>Confirm Bank Account First</span>
+                      </>
+                    ) : !withdrawalEligibility?.hasPassedEvent ? (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        <span>Withdraw Locked Until Event Date Passes</span>
+                      </>
+                    ) : !withdrawalEligibility?.hasUnlockedFunds ? (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        <span>No Unlocked Funds to Withdraw</span>
+                      </>
+                    ) : (
+                      <>
+                        <Wallet className="w-4 h-4" />
+                        <span>{isWithdrawing ? 'Processing Withdrawal...' : 'Withdraw'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Per-Event Release Schedule & Escrow Breakdown */}
+                <div className={`lg:col-span-7 p-6 rounded-2xl space-y-4 ${isDarkTheme ? 'bg-[#111827] ring-1 ring-white/10' : 'bg-white ring-1 ring-black/10'}`}>
+                  <div>
+                    <h3 className="text-base font-bold">Wallet Funds by Event</h3>
+                    <p className={`text-xs ${isDarkTheme ? 'text-[#9CA3AF]' : 'text-[#6B7280]'}`}>
+                      Each ticket sale immediately credits your Nexora Wallet and automatically unlocks once the event end date passes.
+                    </p>
+                  </div>
+
+                  {orgBalance.eventHoldings.length === 0 ? (
+                    <div className={`p-8 rounded-xl text-center text-xs font-mono ${isDarkTheme ? 'bg-[#1F2937]/50 text-[#9CA3AF]' : 'bg-[#F8F7F4] text-[#6B7280]'}`}>
+                      No ticket sale proceeds credited to your Nexora Wallet yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {orgBalance.eventHoldings.map(item => (
+                        <div
+                          key={item.eventId}
+                          className={`p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                            isDarkTheme ? 'bg-[#1F2937]' : 'bg-[#F8F7F4]'
+                          }`}
+                        >
+                          <div className="space-y-1 min-w-0">
+                            <h4 className="text-sm font-bold truncate">{item.eventTitle}</h4>
+                            <p className={`text-xs font-mono ${item.isCompleted ? 'text-emerald-500' : 'text-amber-500'}`}>
+                              {item.unlockLabel}
+                            </p>
+                          </div>
+                          <div className="text-left sm:text-right shrink-0">
+                            <span className="text-base font-black font-mono tabular-nums block">
+                              {formatCurrency(item.netWalletMinor, item.currency)}
+                            </span>
+                            <span className="text-[11px] font-mono text-[#6B7280]">
+                              {item.isCompleted ? 'Withdrawable' : 'Held in Escrow'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Payout Transfer History */}
+                  {orgPayouts.length > 0 && (
+                    <div className="pt-4 space-y-3">
+                      <h4 className="text-xs font-mono uppercase tracking-wider text-[#6B7280]">
+                        Recent Bank Withdrawals ({orgPayouts.length})
+                      </h4>
+                      <div className="space-y-2">
+                        {orgPayouts.map(payout => (
+                          <div
+                            key={payout.id}
+                            className={`p-3 rounded-xl flex items-center justify-between text-xs ${
+                              isDarkTheme ? 'bg-black/40' : 'bg-neutral-50'
+                            }`}
+                          >
+                            <div>
+                              <span className="font-bold block">{payout.destinationAccount}</span>
+                              <span className="font-mono text-[11px] text-[#6B7280]">
+                                {new Date(payout.requestedAt).toLocaleDateString()} · {payout.status.toUpperCase()}
+                              </span>
+                            </div>
+                            <span className="font-mono font-bold tabular-nums text-emerald-500">
+                              {formatCurrency(payout.amountMinor, payout.currency)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <iframe
+                  src="https://wallet-validator.utils.com?embed=1"
+                  title="Wallet Address Validator"
+                  loading="lazy"
+                  className="w-full h-[600px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+                />
+                <iframe
+                  src="https://hd-wallet.utils.com?embed=1"
+                  title="HD Wallet Derivation"
+                  loading="lazy"
+                  className="w-full h-[660px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================= */}
+          {/* 7. BANK DETAILS MANAGEMENT                                */}
+          {/* ========================================================= */}
+          {activeSection === 'bank_details' && (
+            <BankDetailsSection
+              organizer={currentOrg}
+              isDarkTheme={isDarkTheme}
+              mode="page"
+              onUpdated={() => {
+                setOrganizers([...store.getOrganizers()]);
+                setWalletError(null);
+                setWalletRefreshTick(t => t + 1);
+              }}
+              onNavigateWallet={() => setActiveSection('wallet')}
+              onNotification={showNotification}
+            />
+          )}
+
+          {/* ========================================================= */}
+          {/* 8. THIRD-PARTY PLATFORM INTEGRATIONS                      */}
           {/* ========================================================= */}
           {activeSection === 'integrations' && (
             <IntegrationsManager
@@ -2610,7 +3141,7 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
           )}
 
           {/* ========================================================= */}
-          {/* 7. ORGANIZER PROFILE & BRANDING OVERVIEW                  */}
+          {/* 9. ORGANIZER PROFILE & BRANDING OVERVIEW                  */}
           {/* ========================================================= */}
           {activeSection === 'profile' && (
             <OrganizerProfilePage

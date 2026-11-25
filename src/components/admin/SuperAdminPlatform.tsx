@@ -69,6 +69,8 @@ import { OrganizerProfile, Event, CountryLaunchGate, WebhookLog, LedgerEntry, Au
 import { IntegrationArchitectureView } from './IntegrationArchitectureView';
 import { WaitlistReclamationDrawer } from './WaitlistReclamationDrawer';
 import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
+import { NexoraVenueMap } from '../maps/NexoraVenueMap';
+import { VenueMapsGroundingCard, SearchIntelCard } from '../maps/GroundedIntelligencePanel';
 import {
   checkSupabaseHealth,
   rotateSupabaseKeys,
@@ -278,9 +280,9 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
         clearAdminSessionToken();
       }
 
-      // Check first-run passkey bootstrap status
+      // Check first-run passkey bootstrap status (no-store so updated server secrets take effect immediately)
       try {
-        const statusRes = await fetch('/api/admin/bootstrap-status');
+        const statusRes = await fetch('/api/admin/bootstrap-status', { cache: 'no-store' });
         if (statusRes.ok && active) {
           const statusData = await statusRes.json();
           if (statusData?.mode === 'env_configured' || statusData?.mode === 'claimed' || statusData?.mode === 'needs_bootstrap') {
@@ -908,6 +910,35 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
           body: JSON.stringify({ passkey: cleaned }),
         });
         const data = await res.json().catch(() => ({}));
+
+        if (res.status === 409) {
+          const nextMode = data?.mode === 'claimed' ? 'claimed' : 'env_configured';
+          setBootstrapMode(nextMode);
+          setConfirmPasskeyInput('');
+
+          // Automatically verify against the configured/claimed passkey in case the user entered it directly
+          const verifyRes = await fetch('/api/admin/verify-passkey', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ passkey: cleaned }),
+          });
+          const verifyData = await verifyRes.json().catch(() => ({}));
+          if (verifyRes.ok && verifyData.token) {
+            setAdminSessionToken(verifyData.token);
+            setIsPasskeyAuthorized(true);
+            setPasskeyInput('');
+            setPasskeyError(null);
+          } else {
+            setPasskeyInput('');
+            setPasskeyError(
+              verifyData.error ||
+                data.error ||
+                'Root passkey is already configured. Enter your passkey to sign in.'
+            );
+          }
+          return;
+        }
+
         if (!res.ok || !data.token) {
           setPasskeyError(data.error || 'Could not claim initial root passkey.');
           return;
@@ -963,6 +994,14 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     setPasskeyInput('');
     setConfirmPasskeyInput('');
     setPasskeyError(null);
+    fetch('/api/admin/bootstrap-status', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (d?.mode === 'env_configured' || d?.mode === 'claimed' || d?.mode === 'needs_bootstrap') {
+          setBootstrapMode(d.mode);
+        }
+      })
+      .catch(() => {});
   };
 
   const menuItems = [
@@ -2592,6 +2631,13 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
               </div>
             </div>
 
+            <iframe
+              src="https://totp-generator.utils.com?embed=1"
+              title="2FA Code Generator (TOTP)"
+              loading="lazy"
+              className="w-full h-[620px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+            />
+
           </div>
         )}
 
@@ -3973,6 +4019,47 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
 
             </div>
 
+            {/* Live Venue Map, Google Maps Grounding & Google Search Due-Diligence */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className={`p-6 rounded-2xl border space-y-4 ${
+                isDark ? 'bg-[#0E121B] border-white/10' : 'bg-white border-black/10 shadow-xs'
+              }`}>
+                <h3 className="text-sm font-bold font-mono">Verified Venue Telemetry (Google Maps)</h3>
+                <NexoraVenueMap
+                  mode="single"
+                  venueName={activeEvent.venue?.name || 'Venue'}
+                  venueAddress={activeEvent.venue?.address}
+                  venueCity={activeEvent.venue?.city}
+                  venueCountry={activeEvent.venue?.country}
+                  coordinates={activeEvent.venue?.coordinates}
+                  eventTitle={activeEvent.title}
+                  heightClassName="h-[240px]"
+                  enableDirections={false}
+                  theme={theme}
+                />
+                <VenueMapsGroundingCard
+                  venueName={activeEvent.venue?.name || 'Venue'}
+                  city={activeEvent.venue?.city || 'Cape Town'}
+                  country={activeEvent.venue?.country || 'South Africa'}
+                  coordinates={activeEvent.venue?.coordinates}
+                  defaultFocus="operations_safety"
+                  theme={theme}
+                />
+              </div>
+
+              <div className={`p-6 rounded-2xl border space-y-4 ${
+                isDark ? 'bg-[#0E121B] border-white/10' : 'bg-white border-black/10 shadow-xs'
+              }`}>
+                <SearchIntelCard
+                  initialQuery={`${activeEvent.organizer?.name || ''} ${activeEvent.title} ${activeEvent.venue?.city || ''}`.trim()}
+                  category="promoter"
+                  title="Promoter & Event Web Due-Diligence (Google Search)"
+                  subtitle="Inspect real-time public press, permit notices, and promoter reputation via Google Search grounding."
+                  theme={theme}
+                />
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -4436,10 +4523,10 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-3 border-inherit">
                 <div>
                   <span className="text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
-                    Live Payment Gateway Ingestion Endpoints
+                    Payment Gateway Webhook Ingestion Status
                   </span>
                   <p className="text-[11px] opacity-60 font-mono mt-0.5">
-                    Production cryptographic HMAC receivers active on port 3000
+                    Server webhook listeners disabled (no gateway webhook secrets configured)
                   </p>
                 </div>
                 {webhookLogs.length > 0 && (
@@ -4455,29 +4542,29 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
                 <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white">Paystack Webhook</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Listening</span>
+                    <span className="font-bold text-white">Paystack Adapter</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-500/20 text-neutral-300">Disabled</span>
                   </div>
-                  <div className="text-[11px] opacity-70">POST /api/webhooks/paystack</div>
-                  <div className="text-[10px] opacity-40">Header: x-paystack-signature · HMAC-SHA512</div>
+                  <div className="text-[11px] opacity-70">Webhook Receiver Not Active</div>
+                  <div className="text-[10px] opacity-40">Gateway webhook secret removed</div>
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white">Stripe Webhook</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Listening</span>
+                    <span className="font-bold text-white">Stripe Adapter</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-500/20 text-neutral-300">Disabled</span>
                   </div>
-                  <div className="text-[11px] opacity-70">POST /api/webhooks/stripe</div>
-                  <div className="text-[10px] opacity-40">Header: stripe-signature · HMAC-SHA256</div>
+                  <div className="text-[11px] opacity-70">Webhook Receiver Not Active</div>
+                  <div className="text-[10px] opacity-40">Gateway webhook secret removed</div>
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white">Flutterwave Webhook</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Listening</span>
+                    <span className="font-bold text-white">Flutterwave Adapter</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-500/20 text-neutral-300">Disabled</span>
                   </div>
-                  <div className="text-[11px] opacity-70">POST /api/webhooks/flutterwave</div>
-                  <div className="text-[10px] opacity-40">Header: verif-hash · Secret Token</div>
+                  <div className="text-[11px] opacity-70">Webhook Receiver Not Active</div>
+                  <div className="text-[10px] opacity-40">Gateway webhook secret removed</div>
                 </div>
               </div>
             </div>
@@ -4926,6 +5013,13 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                     </a>
                   </div>
                 </div>
+
+                <iframe
+                  src="https://encryption-key.utils.com?embed=1"
+                  title="Encryption Key Generator"
+                  loading="lazy"
+                  className="w-full h-[620px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+                />
               </div>
 
               {/* Zero-Data Production Baseline & Purge Control */}

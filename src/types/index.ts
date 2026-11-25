@@ -120,6 +120,7 @@ export interface Order {
   paymentProvider: 'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'stripe_card' | 'sandbox';
   transactionReference: string;
   promoCodeApplied?: string;
+  customAnswers?: Record<string, string>;
   createdAt: string;
   expiresAt: string;
 }
@@ -302,6 +303,8 @@ export interface OrganizerProfile {
     accountHolder: string;
     branchCode?: string;
     accountType?: string;
+    confirmed?: boolean;
+    confirmedAt?: string;
   };
   integrations?: ThirdPartyIntegration[];
   customWebhooks?: CustomWebhookEndpoint[];

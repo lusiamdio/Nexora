@@ -78,9 +78,11 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
   // Banking
   const [bankName, setBankName] = useState(organizer.bankDetails.bankName);
   const [accountNumber, setAccountNumber] = useState(organizer.bankDetails.accountNumber);
+  const [confirmAccountNumber, setConfirmAccountNumber] = useState(organizer.bankDetails.accountNumber);
   const [accountHolder, setAccountHolder] = useState(organizer.bankDetails.accountHolder);
   const [branchCode, setBranchCode] = useState(organizer.bankDetails.branchCode || '');
   const [accountType, setAccountType] = useState(organizer.bankDetails.accountType || 'Business Cheque');
+  const [bankDetailsConfirmed, setBankDetailsConfirmed] = useState(Boolean(organizer.bankDetails.confirmed));
 
   // Legal
   const [taxNumber, setTaxNumber] = useState(organizer.taxNumber || '');
@@ -128,8 +130,19 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
       setErrorMsg('A valid corporate email address is required.');
       return;
     }
-    if (!bankName.trim() || !accountNumber.trim()) {
-      setErrorMsg('Complete payout banking details are required for enterprise ticket settlements.');
+    if (!bankName.trim() || !accountHolder.trim() || accountNumber.trim().length < 5) {
+      setErrorMsg('Complete settlement bank details (Bank Name, Account Holder, and Account Number) are required to receive ticket payments.');
+      setActiveTab('banking');
+      return;
+    }
+    if (accountNumber.trim() !== confirmAccountNumber.trim()) {
+      setErrorMsg('Account Number and Confirm Account Number must match exactly.');
+      setActiveTab('banking');
+      return;
+    }
+    if (!bankDetailsConfirmed) {
+      setErrorMsg('Please confirm your bank account details before saving.');
+      setActiveTab('banking');
       return;
     }
 
@@ -161,6 +174,8 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
         accountHolder: accountHolder.trim(),
         branchCode: branchCode.trim(),
         accountType,
+        confirmed: true,
+        confirmedAt: new Date().toISOString(),
       },
     };
 
@@ -580,14 +595,14 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
           {/* TAB 3: PAYOUT & BANKING */}
           {activeTab === 'banking' && (
             <div className="space-y-4">
-              <div className={`p-4 rounded-xl border flex items-start gap-3 ${
-                isDark ? 'bg-white/5 border-white/10' : 'bg-neutral-50 border-neutral-200'
+              <div className={`p-4 rounded-xl ring-1 flex items-start gap-3 ${
+                isDark ? 'bg-white/5 ring-white/10' : 'bg-neutral-50 ring-black/10'
               }`}>
                 <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <h4 className="font-bold">Enterprise Settlement Rails (T+1 Daily Payouts)</h4>
+                  <h4 className="font-bold">Nexora Wallet Settlement Bank Account</h4>
                   <p className="opacity-70 leading-relaxed">
-                    Ticket revenues cleared through Paystack, Ozow, and M-Pesa are held in segregated trust escrow and disbursed daily to this verified account.
+                    Add and confirm your bank account to receive ticket payments. Proceeds settle into your Nexora Wallet and unlock for withdrawal after each event ends. You can change your banking details anytime.
                   </p>
                 </div>
               </div>
@@ -602,8 +617,8 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
                     value={bankName}
                     onChange={(e) => setBankName(e.target.value)}
                     placeholder="e.g. First National Bank (FNB)"
-                    className={`w-full px-3.5 py-2.5 rounded-xl border font-semibold outline-none ${
-                      isDark ? 'bg-[#161F30] border-[#2A3850] text-white' : 'bg-white border-[#D1D5DB] text-black'
+                    className={`w-full px-3.5 py-2.5 rounded-xl ring-1 font-semibold outline-none ${
+                      isDark ? 'bg-[#161F30] ring-white/15 text-white' : 'bg-white ring-black/15 text-black'
                     }`}
                   />
                 </div>
@@ -617,8 +632,8 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
                     value={accountHolder}
                     onChange={(e) => setAccountHolder(e.target.value)}
                     placeholder="Must match Legal Entity Name"
-                    className={`w-full px-3.5 py-2.5 rounded-xl border font-semibold outline-none ${
-                      isDark ? 'bg-[#161F30] border-[#2A3850] text-white' : 'bg-white border-[#D1D5DB] text-black'
+                    className={`w-full px-3.5 py-2.5 rounded-xl ring-1 font-semibold outline-none ${
+                      isDark ? 'bg-[#161F30] ring-white/15 text-white' : 'bg-white ring-black/15 text-black'
                     }`}
                   />
                 </div>
@@ -632,10 +647,34 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
                     value={accountNumber}
                     onChange={(e) => setAccountNumber(e.target.value)}
                     placeholder="e.g. 62891048291"
-                    className={`w-full px-3.5 py-2.5 rounded-xl border font-mono font-bold outline-none ${
-                      isDark ? 'bg-[#161F30] border-[#2A3850] text-white' : 'bg-white border-[#D1D5DB] text-black'
+                    className={`w-full px-3.5 py-2.5 rounded-xl ring-1 font-mono font-bold outline-none ${
+                      isDark ? 'bg-[#161F30] ring-white/15 text-white' : 'bg-white ring-black/15 text-black'
                     }`}
                   />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 opacity-80">
+                    Confirm Account Number *
+                  </label>
+                  <input
+                    type="text"
+                    value={confirmAccountNumber}
+                    onChange={(e) => setConfirmAccountNumber(e.target.value)}
+                    placeholder="Re-enter account number"
+                    className={`w-full px-3.5 py-2.5 rounded-xl ring-1 font-mono font-bold outline-none ${
+                      confirmAccountNumber && confirmAccountNumber.trim() !== accountNumber.trim()
+                        ? 'ring-red-500'
+                        : isDark
+                          ? 'bg-[#161F30] ring-white/15 text-white'
+                          : 'bg-white ring-black/15 text-black'
+                    } ${isDark ? 'bg-[#161F30] text-white' : 'bg-white text-black'}`}
+                  />
+                  {confirmAccountNumber && confirmAccountNumber.trim() !== accountNumber.trim() && (
+                    <span className="text-[10px] font-mono text-red-400 mt-1 block">
+                      Account numbers do not match.
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -647,21 +686,21 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
                     value={branchCode}
                     onChange={(e) => setBranchCode(e.target.value)}
                     placeholder="e.g. 250655"
-                    className={`w-full px-3.5 py-2.5 rounded-xl border font-mono outline-none ${
-                      isDark ? 'bg-[#161F30] border-[#2A3850] text-white' : 'bg-white border-[#D1D5DB] text-black'
+                    className={`w-full px-3.5 py-2.5 rounded-xl ring-1 font-mono outline-none ${
+                      isDark ? 'bg-[#161F30] ring-white/15 text-white' : 'bg-white ring-black/15 text-black'
                     }`}
                   />
                 </div>
 
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 opacity-80">
                     Account Classification
                   </label>
                   <select
                     value={accountType}
                     onChange={(e) => setAccountType(e.target.value)}
-                    className={`w-full px-3.5 py-2.5 rounded-xl border font-semibold outline-none ${
-                      isDark ? 'bg-[#161F30] border-[#2A3850] text-white' : 'bg-white border-[#D1D5DB] text-black'
+                    className={`w-full px-3.5 py-2.5 rounded-xl ring-1 font-semibold outline-none ${
+                      isDark ? 'bg-[#161F30] ring-white/15 text-white' : 'bg-white ring-black/15 text-black'
                     }`}
                   >
                     <option value="Business Cheque">Business Cheque Account</option>
@@ -671,6 +710,24 @@ export const EditOrganizerProfileModal: React.FC<EditOrganizerProfileModalProps>
                   </select>
                 </div>
               </div>
+
+              <label className={`p-3.5 rounded-xl flex items-start gap-2.5 cursor-pointer ring-1 ${
+                bankDetailsConfirmed
+                  ? 'bg-emerald-500/10 ring-emerald-500/30'
+                  : isDark
+                    ? 'bg-white/5 ring-white/15'
+                    : 'bg-neutral-50 ring-black/15'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={bankDetailsConfirmed}
+                  onChange={e => setBankDetailsConfirmed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-[#F6A623] cursor-pointer"
+                />
+                <span className="text-xs leading-relaxed">
+                  I confirm these bank account details are accurate to receive ticket payments. I can change and re-confirm them anytime.
+                </span>
+              </label>
             </div>
           )}
 

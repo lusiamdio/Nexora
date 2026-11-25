@@ -476,3 +476,114 @@ export async function checkInTicketInSupabase(
   }
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isValidUuid(value?: string | null): boolean {
+  return Boolean(value && UUID_REGEX.test(value.trim()));
+}
+
+/**
+ * Syncs organizer bank details via Supabase RPC `upsert_organizer_bank_details` when authenticated with a UUID organizer record.
+ */
+export async function upsertOrganizerBankDetailsInSupabase(params: {
+  organizerId: string;
+  bankName: string;
+  accountHolder: string;
+  accountNumber: string;
+  confirmAccountNumber: string;
+  branchCode?: string;
+  accountType?: string;
+  confirmed: boolean;
+}): Promise<{ synced: boolean; error?: string; data?: any }> {
+  if (!isSupabaseConfigured() || !isValidUuid(params.organizerId)) {
+    return { synced: false };
+  }
+  try {
+    const session = await supabaseGetSession();
+    if (!session) return { synced: false };
+
+    const { data, error } = await supabase.rpc('upsert_organizer_bank_details', {
+      p_organizer_id: params.organizerId,
+      p_bank_name: params.bankName.trim(),
+      p_account_holder: params.accountHolder.trim(),
+      p_account_number: params.accountNumber.trim(),
+      p_confirm_account_number: params.confirmAccountNumber.trim(),
+      p_branch_code: params.branchCode?.trim() || null,
+      p_account_type: params.accountType || 'Business Cheque',
+      p_confirmed: params.confirmed,
+    });
+
+    if (error) {
+      return { synced: false, error: error.message };
+    }
+    return { synced: true, data };
+  } catch (err: any) {
+    return { synced: false, error: err?.message || 'Unable to sync bank details with database.' };
+  }
+}
+
+/**
+ * Queries organizer Nexora Wallet & post-event unlock summary from Supabase RPC.
+ */
+export async function getOrganizerWalletSummaryInSupabase(organizerId: string) {
+  if (!isSupabaseConfigured() || !isValidUuid(organizerId)) return null;
+  try {
+    const session = await supabaseGetSession();
+    if (!session) return null;
+
+    const { data, error } = await supabase.rpc('get_organizer_wallet_summary', {
+      p_organizer_id: organizerId,
+    });
+    if (error) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Submits a post-event Nexora Wallet payout withdrawal via Supabase RPC `request_organizer_payout`.
+ */
+export async function requestOrganizerPayoutInSupabase(
+  organizerId: string,
+  amountMinor: number,
+  currency = 'ZAR'
+): Promise<{ synced: boolean; error?: string; data?: any }> {
+  if (!isSupabaseConfigured() || !isValidUuid(organizerId)) {
+    return { synced: false };
+  }
+  try {
+    const session = await supabaseGetSession();
+    if (!session) return { synced: false };
+
+    const { data, error } = await supabase.rpc('request_organizer_payout', {
+      p_organizer_id: organizerId,
+      p_amount_minor: amountMinor,
+      p_currency: currency,
+    });
+
+    if (error) {
+      return { synced: false, error: error.message };
+    }
+    return { synced: true, data };
+  } catch (err: any) {
+    return { synced: false, error: err?.message || 'Unable to process Supabase payout withdrawal.' };
+  }
+}
+
+/**
+ * Checks whether an event organizer has confirmed settlement bank details in Supabase.
+ */
+export async function canOrganizerReceivePaymentInSupabase(eventId: string, totalMinor?: number) {
+  if (!isSupabaseConfigured() || !isValidUuid(eventId)) return null;
+  try {
+    const { data, error } = await supabase.rpc('can_organizer_receive_payment', {
+      p_event_id: eventId,
+      p_total_minor: typeof totalMinor === 'number' ? totalMinor : null,
+    });
+    if (error) return null;
+    return data as { allowed: boolean; reason?: string };
+  } catch {
+    return null;
+  }
+}

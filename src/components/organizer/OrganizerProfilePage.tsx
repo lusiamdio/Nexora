@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { OrganizerProfile, Event } from '../../types';
 import { store } from '../../lib/store';
+import { upsertOrganizerBankDetailsInSupabase } from '../../lib/supabase';
 import heroFestivalImg from '../../assets/images/hero_afro_festival_1791591623547.jpg';
 import techSummitImg from '../../assets/images/event_tech_summit_1791591635169.jpg';
 import culinaryWineImg from '../../assets/images/event_culinary_wine_1791591643928.jpg';
@@ -94,9 +95,11 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
   // Settlement Banking
   const [bankName, setBankName] = useState(organizer.bankDetails.bankName);
   const [accountNumber, setAccountNumber] = useState(organizer.bankDetails.accountNumber);
+  const [confirmAccountNumber, setConfirmAccountNumber] = useState(organizer.bankDetails.accountNumber);
   const [accountHolder, setAccountHolder] = useState(organizer.bankDetails.accountHolder);
   const [branchCode, setBranchCode] = useState(organizer.bankDetails.branchCode || '');
   const [accountType, setAccountType] = useState(organizer.bankDetails.accountType || 'Business Cheque');
+  const [bankDetailsConfirmed, setBankDetailsConfirmed] = useState(Boolean(organizer.bankDetails.confirmed));
   const [settlementSchedule, setSettlementSchedule] = useState<'daily' | 'weekly' | 'post_event'>('daily');
 
   // Legal & Compliance
@@ -153,7 +156,7 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
     setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim()) {
       setErrorMsg('Organization display name is required.');
       return;
@@ -162,46 +165,75 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
       setErrorMsg('A valid corporate email address is required.');
       return;
     }
-    if (!bankName.trim() || !accountNumber.trim()) {
-      setErrorMsg('Complete payout banking details are required for enterprise ticket settlements.');
+    if (!bankName.trim() || !accountHolder.trim() || accountNumber.trim().length < 5) {
+      setErrorMsg('Complete settlement bank details (Bank Name, Account Holder, and Account Number) are required to receive ticket payments.');
+      setActiveTab('banking');
+      return;
+    }
+    if (accountNumber.trim() !== confirmAccountNumber.trim()) {
+      setErrorMsg('Account Number and Confirm Account Number must match exactly.');
+      setActiveTab('banking');
+      return;
+    }
+    if (!bankDetailsConfirmed) {
+      setErrorMsg('Please check the confirmation box verifying your settlement bank account details.');
+      setActiveTab('banking');
       return;
     }
 
     setSaving(true);
     setErrorMsg(null);
 
-    const updates: Partial<OrganizerProfile> = {
-      name: name.trim(),
-      legalEntityName: legalEntityName.trim(),
-      bio: bio.trim(),
-      website: website.trim(),
-      logoUrl,
-      bannerUrl,
-      email: email.trim(),
-      phone: phone.trim(),
-      country,
-      city: city.trim(),
-      address: address.trim(),
-      taxNumber: taxNumber.trim(),
-      registrationNumber: registrationNumber.trim(),
-      socialLinks: {
-        instagram: instagram.trim(),
-        twitter: twitter.trim(),
-        linkedin: linkedin.trim(),
-        youtube: youtube.trim(),
-      },
-      bankDetails: {
+    try {
+      const supabaseResult = await upsertOrganizerBankDetailsInSupabase({
+        organizerId: organizer.id,
         bankName: bankName.trim(),
-        accountNumber: accountNumber.trim(),
         accountHolder: accountHolder.trim(),
+        accountNumber: accountNumber.trim(),
+        confirmAccountNumber: confirmAccountNumber.trim(),
         branchCode: branchCode.trim(),
         accountType,
-      },
-    };
+        confirmed: true,
+      });
 
-    setTimeout(() => {
+      if (supabaseResult.error) {
+        setErrorMsg(supabaseResult.error);
+        setActiveTab('banking');
+        return;
+      }
+
+      const updates: Partial<OrganizerProfile> = {
+        name: name.trim(),
+        legalEntityName: legalEntityName.trim(),
+        bio: bio.trim(),
+        website: website.trim(),
+        logoUrl,
+        bannerUrl,
+        email: email.trim(),
+        phone: phone.trim(),
+        country,
+        city: city.trim(),
+        address: address.trim(),
+        taxNumber: taxNumber.trim(),
+        registrationNumber: registrationNumber.trim(),
+        socialLinks: {
+          instagram: instagram.trim(),
+          twitter: twitter.trim(),
+          linkedin: linkedin.trim(),
+          youtube: youtube.trim(),
+        },
+        bankDetails: {
+          bankName: bankName.trim(),
+          accountNumber: accountNumber.trim(),
+          accountHolder: accountHolder.trim(),
+          branchCode: branchCode.trim(),
+          accountType,
+          confirmed: true,
+          confirmedAt: new Date().toISOString(),
+        },
+      };
+
       const result = store.updateOrganizerProfile(organizer.id, updates);
-      setSaving(false);
       if (result) {
         setSavedSuccess(true);
         onSaved(result);
@@ -209,7 +241,9 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
       } else {
         setErrorMsg('Failed to persist profile changes. Please try again.');
       }
-    }, 450);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -724,19 +758,32 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
         {/* ========================================================= */}
         {activeTab === 'banking' && (
           <div className="space-y-6 animate-fadeIn">
-            <div className={`p-6 sm:p-8 rounded-2xl border space-y-6 ${
-              isDark ? 'bg-[#0E131F] border-[#1F2937]' : 'bg-white border-[#E5E7EB] shadow-xs'
+            <div className={`p-6 sm:p-8 rounded-2xl ring-1 space-y-6 ${
+              isDark ? 'bg-[#0E131F] ring-white/10' : 'bg-white ring-black/10 shadow-xs'
             }`}>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-bold">Settlement Banking & Payout Rails</h3>
+                  <h3 className="text-base font-bold">Settlement Banking & Payout Account</h3>
                   <p className={`text-xs ${isDark ? 'text-white/60' : 'text-neutral-500'}`}>
-                    Primary bank account receiving ticket revenues via Ozow, M-Pesa, Paystack, and Card rails.
+                    Add and confirm your bank account to receive ticket payments. You can update your banking details anytime.
                   </p>
                 </div>
-                <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5" />
-                  Direct EFT Active
+                <span className={`px-3 py-1 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 ${
+                  organizer.bankDetails.confirmed && bankName.trim() && accountNumber.trim()
+                    ? 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30'
+                    : 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30'
+                }`}>
+                  {organizer.bankDetails.confirmed && bankName.trim() && accountNumber.trim() ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Confirmed Account</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Confirmation Required</span>
+                    </>
+                  )}
                 </span>
               </div>
 
@@ -750,8 +797,8 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
                     value={bankName}
                     onChange={e => setBankName(e.target.value)}
                     placeholder="e.g. Standard Bank / First National Bank"
-                    className={`w-full px-4 py-2.5 rounded-xl text-sm border focus:outline-none ${
-                      isDark ? 'bg-[#151D2C] border-[#253247] text-white' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-[#F6A623] ${
+                      isDark ? 'bg-[#151D2C] ring-white/15 text-white' : 'bg-neutral-50 ring-black/15 text-neutral-900'
                     }`}
                   />
                 </div>
@@ -765,8 +812,8 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
                     value={accountHolder}
                     onChange={e => setAccountHolder(e.target.value)}
                     placeholder="e.g. Cape Town Entertainment Group (Pty) Ltd"
-                    className={`w-full px-4 py-2.5 rounded-xl text-sm border focus:outline-none ${
-                      isDark ? 'bg-[#151D2C] border-[#253247] text-white' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-[#F6A623] ${
+                      isDark ? 'bg-[#151D2C] ring-white/15 text-white' : 'bg-neutral-50 ring-black/15 text-neutral-900'
                     }`}
                   />
                 </div>
@@ -780,23 +827,47 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
                     value={accountNumber}
                     onChange={e => setAccountNumber(e.target.value)}
                     placeholder="e.g. 10184920491"
-                    className={`w-full px-4 py-2.5 rounded-xl text-sm font-mono border focus:outline-none ${
-                      isDark ? 'bg-[#151D2C] border-[#253247] text-white' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm font-mono ring-1 focus:outline-none focus:ring-2 focus:ring-[#F6A623] ${
+                      isDark ? 'bg-[#151D2C] ring-white/15 text-white' : 'bg-neutral-50 ring-black/15 text-neutral-900'
                     }`}
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-mono uppercase font-bold mb-1.5">
-                    Branch / Clearing Code *
+                    Confirm Account Number *
+                  </label>
+                  <input
+                    type="text"
+                    value={confirmAccountNumber}
+                    onChange={e => setConfirmAccountNumber(e.target.value)}
+                    placeholder="Re-enter account number to confirm"
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm font-mono ring-1 focus:outline-none focus:ring-2 ${
+                      confirmAccountNumber && confirmAccountNumber.trim() !== accountNumber.trim()
+                        ? 'ring-red-500 focus:ring-red-500'
+                        : 'focus:ring-[#F6A623]'
+                    } ${
+                      isDark ? 'bg-[#151D2C] ring-white/15 text-white' : 'bg-neutral-50 ring-black/15 text-neutral-900'
+                    }`}
+                  />
+                  {confirmAccountNumber && confirmAccountNumber.trim() !== accountNumber.trim() && (
+                    <span className="text-[11px] font-mono text-red-400 mt-1 block">
+                      Account numbers do not match.
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-mono uppercase font-bold mb-1.5">
+                    Branch / Clearing Code
                   </label>
                   <input
                     type="text"
                     value={branchCode}
                     onChange={e => setBranchCode(e.target.value)}
                     placeholder="e.g. 250655"
-                    className={`w-full px-4 py-2.5 rounded-xl text-sm font-mono border focus:outline-none ${
-                      isDark ? 'bg-[#151D2C] border-[#253247] text-white' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm font-mono ring-1 focus:outline-none focus:ring-2 focus:ring-[#F6A623] ${
+                      isDark ? 'bg-[#151D2C] ring-white/15 text-white' : 'bg-neutral-50 ring-black/15 text-neutral-900'
                     }`}
                   />
                 </div>
@@ -808,8 +879,8 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
                   <select
                     value={accountType}
                     onChange={e => setAccountType(e.target.value)}
-                    className={`w-full px-4 py-2.5 rounded-xl text-sm border focus:outline-none cursor-pointer ${
-                      isDark ? 'bg-[#151D2C] border-[#253247] text-white' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm ring-1 focus:outline-none cursor-pointer ${
+                      isDark ? 'bg-[#151D2C] ring-white/15 text-white' : 'bg-neutral-50 ring-black/15 text-neutral-900'
                     }`}
                   >
                     <option value="Business Cheque">Business Cheque / Checking</option>
@@ -818,28 +889,46 @@ export const OrganizerProfilePage: React.FC<OrganizerProfilePageProps> = ({
                   </select>
                 </div>
 
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-xs font-mono uppercase font-bold mb-1.5">
-                    Automated Settlement Schedule
+                    Post-Event Withdrawal Preference
                   </label>
                   <select
                     value={settlementSchedule}
                     onChange={e => setSettlementSchedule(e.target.value as any)}
-                    className={`w-full px-4 py-2.5 rounded-xl text-sm border focus:outline-none cursor-pointer ${
-                      isDark ? 'bg-[#151D2C] border-[#253247] text-white' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm ring-1 focus:outline-none cursor-pointer ${
+                      isDark ? 'bg-[#151D2C] ring-white/15 text-white' : 'bg-neutral-50 ring-black/15 text-neutral-900'
                     }`}
                   >
-                    <option value="daily">Daily Automated Transfers</option>
-                    <option value="weekly">Weekly Friday Batch</option>
-                    <option value="post_event">T+1 Post Event Final Settlement</option>
+                    <option value="post_event">Unlock in Nexora Wallet after Event Ends (Required Default)</option>
+                    <option value="daily">T+1 Post-Event Automated Transfer</option>
+                    <option value="weekly">Weekly Post-Event Batch Settlement</option>
                   </select>
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/30 text-xs flex items-center gap-3 text-blue-300">
+              <label className={`p-4 rounded-xl flex items-start gap-3 cursor-pointer ring-1 ${
+                bankDetailsConfirmed
+                  ? 'bg-emerald-500/10 ring-emerald-500/30'
+                  : isDark
+                    ? 'bg-[#151D2C] ring-white/15'
+                    : 'bg-neutral-50 ring-black/15'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={bankDetailsConfirmed}
+                  onChange={e => setBankDetailsConfirmed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-[#F6A623] cursor-pointer"
+                />
+                <span className="text-xs leading-relaxed">
+                  <strong>I confirm these bank account details are accurate</strong> and belong to this organization to receive ticket settlements. I understand I can update and re-confirm these banking details anytime.
+                </span>
+              </label>
+
+              <div className="p-4 rounded-xl bg-blue-500/10 ring-1 ring-blue-500/30 text-xs flex items-center gap-3 text-blue-300">
                 <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
                 <span>
-                  Bank accounts are verified with national instant EFT rails. Settlements clear automatically without requiring manual withdrawal requests.
+                  Ticket proceeds settle into your Nexora Wallet upon purchase and become withdrawable to this confirmed bank account once each event finishes.
                 </span>
               </div>
             </div>

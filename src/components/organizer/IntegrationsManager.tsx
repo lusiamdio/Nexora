@@ -635,6 +635,13 @@ export const IntegrationsManager: React.FC<IntegrationsManagerProps> = ({
               </table>
             </div>
           </div>
+
+          <iframe
+            src="https://encryption-key.utils.com?embed=1"
+            title="Encryption Key Generator"
+            loading="lazy"
+            className="w-full h-[620px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+          />
         </div>
       )}
 
