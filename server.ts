@@ -1640,6 +1640,58 @@ app.use('/api', (err: any, _req: Request, res: Response, _next: NextFunction) =>
 });
 
 // -------------------------------------------------------------
+// 10. SEO Crawlability: Dynamic robots.txt & sitemap.xml
+// -------------------------------------------------------------
+function resolvePublicBaseUrl(req: Request): string | null {
+  const configuredAppUrl = process.env.APP_URL?.trim();
+  if (configuredAppUrl && isSafeHttpsUrl(configuredAppUrl)) {
+    return configuredAppUrl.replace(/\/+$/, '');
+  }
+  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string' ? req.headers['x-forwarded-proto'].split(',')[0].trim() : '';
+  const proto = forwardedProto === 'https' || req.secure ? 'https' : 'http';
+  const rawHost = typeof req.headers.host === 'string' ? req.headers.host.trim() : '';
+  if (rawHost && /^[a-zA-Z0-9.-]+(:\d+)?$/.test(rawHost)) {
+    return `${proto}://${rawHost}`;
+  }
+  return null;
+}
+
+app.get('/robots.txt', (req, res) => {
+  const baseUrl = resolvePublicBaseUrl(req);
+  const lines = [
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /api/',
+    'Disallow: /supabase_*.sql',
+  ];
+  if (baseUrl) {
+    lines.push(`Sitemap: ${baseUrl}/sitemap.xml`);
+  }
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.status(200).send(`${lines.join('\n')}\n`);
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const baseUrl = resolvePublicBaseUrl(req) || 'https://nexora.events';
+  const today = new Date().toISOString().split('T')[0];
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    '  <url>',
+    `    <loc>${baseUrl}/</loc>`,
+    `    <lastmod>${today}</lastmod>`,
+    '    <changefreq>daily</changefreq>',
+    '    <priority>1.0</priority>',
+    '  </url>',
+    '</urlset>',
+  ].join('\n');
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.status(200).send(`${xml}\n`);
+});
+
+// -------------------------------------------------------------
 // Dev & Production Middleware Setup
 // -------------------------------------------------------------
 if (!isProd) {

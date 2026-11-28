@@ -252,6 +252,49 @@ export default function App() {
     }
   }, [currentUser, activeView]);
 
+  // Synchronize canonical URL, og:url, robots directive, and page title across SPA states
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const baseOrigin = window.location.origin;
+    const isPublicIndexableView =
+      activeView === 'marketplace' ||
+      activeView === 'event' ||
+      activeView === 'terms' ||
+      activeView === 'privacy' ||
+      activeView === 'security';
+
+    const canonicalUrl =
+      activeView === 'event' && inspectEvent
+        ? `${baseOrigin}/?event=${encodeURIComponent(inspectEvent.id)}`
+        : `${baseOrigin}${window.location.pathname === '/' ? '/' : window.location.pathname}`;
+
+    const canonicalEl = document.querySelector('link[rel="canonical"]');
+    if (canonicalEl) {
+      canonicalEl.setAttribute('href', canonicalUrl);
+    }
+
+    const ogUrlEl = document.querySelector('meta[property="og:url"]');
+    if (ogUrlEl) {
+      ogUrlEl.setAttribute('content', canonicalUrl);
+    }
+
+    const robotsEl = document.querySelector('meta[name="robots"]');
+    if (robotsEl) {
+      robotsEl.setAttribute(
+        'content',
+        isPublicIndexableView
+          ? 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+          : 'noindex, nofollow'
+      );
+    }
+
+    document.title =
+      activeView === 'event' && inspectEvent
+        ? `${inspectEvent.title} — NEXORA`
+        : 'NEXORA — Event Commerce Platform';
+  }, [activeView, inspectEvent]);
+
   const handleCurrencyChange = (curr: string) => {
     setCurrency(curr);
     store.setSelectedCurrency(curr);

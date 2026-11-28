@@ -155,7 +155,22 @@ test('production API protects admin rotation and validates inputs without paymen
   assert.equal((await fetch(`${base}/api/mailerlite/subscribers`)).status, 401);
   assert.equal((await fetch(`${base}/api/mailerlite/groups`)).status, 401);
 
-  // 12. Unknown API route returns 404
+  // 12. SEO crawlability endpoints serve robots.txt and sitemap.xml with proper Content-Type
+  const robotsRes = await fetch(`${base}/robots.txt`);
+  assert.equal(robotsRes.status, 200);
+  assert.ok((robotsRes.headers.get('content-type') || '').includes('text/plain'));
+  const robotsBody = await robotsRes.text();
+  assert.ok(robotsBody.includes('User-agent: *'));
+  assert.ok(robotsBody.includes('Disallow: /api/'));
+  assert.ok(robotsBody.includes('Sitemap:'));
+
+  const sitemapRes = await fetch(`${base}/sitemap.xml`);
+  assert.equal(sitemapRes.status, 200);
+  assert.ok((sitemapRes.headers.get('content-type') || '').includes('application/xml'));
+  const sitemapBody = await sitemapRes.text();
+  assert.ok(sitemapBody.includes('<urlset'));
+
+  // 13. Unknown API route returns 404
   assert.equal((await fetch(`${base}/api/unknown`)).status, 404);
 });
 
