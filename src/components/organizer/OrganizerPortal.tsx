@@ -92,6 +92,8 @@ import { OrganizerProfilePage } from './OrganizerProfilePage';
 import { EditOrganizerProfileModal } from './EditOrganizerProfileModal';
 import { IntegrationsManager } from './IntegrationsManager';
 import { BankDetailsSection } from './BankDetailsSection';
+import { OrganizerCreditTokensPanel } from './OrganizerCreditTokensPanel';
+import { TokenizationStats } from './TokenizationStats';
 import { WaitlistReclamationDrawer } from '../admin/WaitlistReclamationDrawer';
 import { CashlessTerminalModal } from '../cashless/CashlessTerminalModal';
 import { requestOrganizerPayoutInSupabase } from '../../lib/supabase';
@@ -2771,6 +2773,14 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                     </div>
                   </div>
 
+                  <div className="md:col-span-2">
+                    <TokenizationStats
+                      events={allEvents}
+                      tickets={allTickets}
+                      isDarkTheme={isDarkTheme}
+                    />
+                  </div>
+
                 </div>
               )}
 
@@ -3093,6 +3103,20 @@ export const OrganizerPortal: React.FC<OrganizerPortalProps> = ({
                   )}
                 </div>
               </div>
+
+              <TokenizationStats
+                events={allEvents}
+                tickets={allTickets}
+                isDarkTheme={isDarkTheme}
+              />
+
+              <OrganizerCreditTokensPanel
+                organizerId={currentOrgId}
+                events={allEvents}
+                currency={walletCurrency}
+                isDarkTheme={isDarkTheme}
+                onNotification={showNotification}
+              />
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <iframe

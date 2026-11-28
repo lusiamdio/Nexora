@@ -14,11 +14,23 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-// Ephemeral cryptographically random session secret fallback (never a hardcoded literal)
-const ADMIN_SESSION_SECRET =
+// Ephemeral cryptographically random session & signing secrets (rotatable in runtime; never hardcoded)
+let adminSessionSecret =
   process.env.ADMIN_SESSION_SECRET && process.env.ADMIN_SESSION_SECRET.length >= 32
     ? process.env.ADMIN_SESSION_SECRET
     : crypto.randomBytes(32).toString('hex');
+
+let creditTokenSecret =
+  process.env.CREDIT_TOKEN_SECRET && process.env.CREDIT_TOKEN_SECRET.length >= 32
+    ? process.env.CREDIT_TOKEN_SECRET
+    : crypto.randomBytes(32).toString('hex');
+
+let keyRotationGeneration = 1;
+let lastKeyRotationAt = new Date().toISOString();
+
+function secretFingerprint(secret: string): string {
+  return `sha256:${crypto.createHash('sha256').update(secret, 'utf8').digest('hex').slice(0, 12).toUpperCase()}`;
+}
 
 const ADMIN_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -179,7 +191,7 @@ function issueAdminSessionToken(sub: string, method: 'passkey' | 'supabase_jwt')
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   const signature = crypto
-    .createHmac('sha256', ADMIN_SESSION_SECRET)
+    .createHmac('sha256', adminSessionSecret)
     .update(encodedPayload)
     .digest('base64url');
   return {
@@ -196,7 +208,7 @@ function verifyAdminSessionToken(token: string): AdminTokenPayload | null {
     if (!encodedPayload || !sig) return null;
 
     const expectedSig = crypto
-      .createHmac('sha256', ADMIN_SESSION_SECRET)
+      .createHmac('sha256', adminSessionSecret)
       .update(encodedPayload)
       .digest('base64url');
 
@@ -945,6 +957,81 @@ app.get('/api/health', (_req, res) => {
 });
 
 // -------------------------------------------------------------
+// 6. Cashless & Loyalty Credit Token Signing & Verification
+// -------------------------------------------------------------
+app.post('/api/tokens/credits/sign', (req, res) => {
+  try {
+    const email = sanitizeInputString(req.body?.email, 160).toLowerCase();
+    const txType = sanitizeInputString(req.body?.txType, 48) || 'mint_cashback';
+    const currency = sanitizeInputString(req.body?.currency, 12).toUpperCase() || 'ZAR';
+    const reference = sanitizeInputString(req.body?.reference, 120) || `NXR-${Date.now().toString(36).toUpperCase()}`;
+    const tokensAmount = Math.floor(Number(req.body?.tokensAmount) || 0);
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Valid account email is required to sign a credit token.' });
+    }
+    if (!Number.isFinite(tokensAmount) || tokensAmount <= 0 || tokensAmount > 100_000_000) {
+      return res.status(400).json({ error: 'Token amount must be a positive integer.' });
+    }
+
+    const issuedAt = new Date().toISOString();
+    const nonce = crypto.randomBytes(8).toString('hex');
+    const canonicalPayload = JSON.stringify({
+      sym: 'NXR',
+      email,
+      txType,
+      tokensAmount,
+      currency,
+      reference,
+      issuedAt,
+      nonce,
+    });
+    const encoded = Buffer.from(canonicalPayload, 'utf8').toString('base64url');
+    const hmac = crypto
+      .createHmac('sha256', creditTokenSecret)
+      .update(encoded)
+      .digest('base64url');
+
+    return res.json({
+      tokenSignature: `nxr1.${encoded}.${hmac}`,
+      fingerprint: crypto.createHash('sha256').update(hmac).digest('hex').slice(0, 16).toUpperCase(),
+      issuedAt,
+    });
+  } catch (err) {
+    console.error('Credit token sign error:', err);
+    return res.status(500).json({ error: 'Failed to sign credit token.' });
+  }
+});
+
+app.post('/api/tokens/credits/verify', (req, res) => {
+  try {
+    const tokenSignature = typeof req.body?.tokenSignature === 'string' ? req.body.tokenSignature.trim() : '';
+    const parts = tokenSignature.split('.');
+    if (parts.length !== 3 || parts[0] !== 'nxr1') {
+      return res.status(400).json({ valid: false, error: 'Malformed NXR credit token format.' });
+    }
+
+    const [, encoded, sig] = parts;
+    const expectedSig = crypto
+      .createHmac('sha256', creditTokenSecret)
+      .update(encoded)
+      .digest('base64url');
+
+    if (!timingSafeEqualNormalized(sig, expectedSig)) {
+      return res.status(403).json({ valid: false, error: 'Cryptographic signature verification failed.' });
+    }
+
+    const decoded = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    return res.json({
+      valid: true,
+      payload: decoded,
+    });
+  } catch {
+    return res.status(400).json({ valid: false, error: 'Unable to decode credit token payload.' });
+  }
+});
+
+// -------------------------------------------------------------
 // 7. Supabase Schema & Admin-Protected Key Management Endpoints
 // -------------------------------------------------------------
 app.get('/supabase_schema.sql', (_req, res) => {
@@ -953,11 +1040,17 @@ app.get('/supabase_schema.sql', (_req, res) => {
 app.get('/supabase_auth_fix.sql', (_req, res) => {
   res.sendFile(path.resolve(__dirname, 'supabase_auth_fix.sql'));
 });
+app.get('/supabase_credit_tokens_migration.sql', (_req, res) => {
+  res.sendFile(path.resolve(__dirname, 'supabase_credit_tokens_migration.sql'));
+});
 app.get('/api/supabase/schema', (_req, res) => {
   res.sendFile(path.resolve(__dirname, 'supabase_schema.sql'));
 });
 app.get('/api/supabase/auth-fix', (_req, res) => {
   res.sendFile(path.resolve(__dirname, 'supabase_auth_fix.sql'));
+});
+app.get('/api/supabase/credit-tokens-migration', (_req, res) => {
+  res.sendFile(path.resolve(__dirname, 'supabase_credit_tokens_migration.sql'));
 });
 
 app.get('/api/supabase/status', requireAdminAuth, async (_req, res) => {
@@ -1075,6 +1168,458 @@ app.post('/api/admin/rotate-keys', requireAdminAuth, adminAuthLimiter, (req, res
     keyFingerprint: fingerprint,
     project: process.env.Supabase_project_id || 'kunabampibfcmnbyjads',
   });
+});
+
+function buildExternalProviderKeyInventory() {
+  return {
+    gemini: Boolean(process.env.GEMINI_API_KEY?.trim()),
+    openai: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    openaiWebhook: Boolean(process.env.OPENAI_WEBHOOK_SECRET?.trim()),
+    alchemy: Boolean(process.env.ALCHEMY_API_KEY?.trim()),
+    alchemyGasPolicy: Boolean(process.env.ALCHEMY_GAS_POLICY_ID?.trim()),
+    alchemyWebhook: Boolean(
+      process.env.ALCHEMY_WEBHOOK_ID?.trim() && process.env.ALCHEMY_WEBHOOK_SIGNING_KEY?.trim()
+    ),
+    supabase: Boolean(process.env.Supabase_anon_key?.trim() || process.env.VITE_SUPABASE_ANON_KEY?.trim()),
+    maps: Boolean(process.env.GOOGLE_MAPS_API_KEY?.trim() || process.env.VITE_GOOGLE_MAPS_API_KEY?.trim()),
+    mailerlite: Boolean(process.env.MAILERLITE_API_TOKEN?.trim()),
+  };
+}
+
+app.get('/api/admin/key-inventory', requireAdminAuth, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    keyRotationGeneration,
+    lastKeyRotationAt,
+    internalFingerprints: {
+      adminSessionSecret: secretFingerprint(adminSessionSecret),
+      creditTokenSecret: secretFingerprint(creditTokenSecret),
+    },
+    externalProviders: buildExternalProviderKeyInventory(),
+  });
+});
+
+app.post(
+  '/api/admin/rotate-all-keys',
+  requireAdminAuth,
+  adminAuthLimiter,
+  (req: Request & { adminSession?: AdminTokenPayload }, res) => {
+    const { passkey, newAnonKey, newUrl } = req.body || {};
+
+    const configuredPasskey = getConfiguredEnvPasskey();
+    if (configuredPasskey) {
+      const submittedPasskey = typeof passkey === 'string' ? passkey.trim() : '';
+      if (!submittedPasskey || !timingSafeEqualNormalized(submittedPasskey, configuredPasskey)) {
+        return res.status(403).json({ error: 'Root authorization passkey rejected. Full rotation aborted.' });
+      }
+    } else if (claimedAdminPasskeyHash) {
+      const submittedPasskey = typeof passkey === 'string' ? passkey.trim() : '';
+      if (!submittedPasskey || !verifyClaimedPasskey(submittedPasskey)) {
+        return res.status(403).json({ error: 'Root authorization passkey rejected. Full rotation aborted.' });
+      }
+    }
+
+    if (typeof newUrl === 'string' && newUrl.trim()) {
+      if (!isSafeHttpsUrl(newUrl.trim())) {
+        return res.status(400).json({
+          error: 'Invalid Supabase project URL. Must be a public HTTPS URL (localhost and private IPs rejected).',
+        });
+      }
+      process.env.Supabase_project_url = newUrl.trim();
+      process.env.VITE_SUPABASE_URL = newUrl.trim();
+    }
+
+    if (typeof newAnonKey === 'string' && newAnonKey.trim()) {
+      const cleanKey = newAnonKey.trim();
+      if (cleanKey.length < 20 || cleanKey.length > 1024) {
+        return res.status(400).json({ error: 'Invalid Supabase anon key length.' });
+      }
+      process.env.Supabase_anon_key = cleanKey;
+      process.env.VITE_SUPABASE_ANON_KEY = cleanKey;
+    }
+
+    // Rotate server-side HMAC signing keys immediately (invalidates all prior session & token signatures)
+    adminSessionSecret = crypto.randomBytes(32).toString('hex');
+    creditTokenSecret = crypto.randomBytes(32).toString('hex');
+    keyRotationGeneration += 1;
+    lastKeyRotationAt = new Date().toISOString();
+
+    const issuedNext = issueAdminSessionToken(
+      req.adminSession?.sub || 'root-passkey-operator',
+      req.adminSession?.method || 'passkey'
+    );
+
+    const rotatedKeys = ['admin_session_secret', 'credit_token_secret'];
+    if (typeof newAnonKey === 'string' && newAnonKey.trim()) {
+      rotatedKeys.push('supabase_anon_key');
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      keyRotationGeneration,
+      rotatedAt: lastKeyRotationAt,
+      rotatedKeys,
+      nextAdminToken: issuedNext.token,
+      nextAdminTokenExpiresAt: issuedNext.expiresAt,
+      internalFingerprints: {
+        adminSessionSecret: secretFingerprint(adminSessionSecret),
+        creditTokenSecret: secretFingerprint(creditTokenSecret),
+      },
+      externalProviders: buildExternalProviderKeyInventory(),
+      externalRotationGuidance:
+        'Regenerate external SaaS API keys and webhook secrets in each provider dashboard and update them in Settings > Secrets.',
+    });
+  }
+);
+
+// -------------------------------------------------------------
+// 8. Alchemy Transfers, Token, NFT, Gas Policy & Webhook Gateway
+// -------------------------------------------------------------
+function isValidEthAddress(value: unknown): value is string {
+  return typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value.trim());
+}
+
+function getAlchemyRpcEndpoint(): string | null {
+  const apiKey = process.env.ALCHEMY_API_KEY?.trim();
+  if (!apiKey) return null;
+  return `https://eth-mainnet.g.alchemy.com/v2/${apiKey}`;
+}
+
+async function callAlchemyJsonRpc(method: string, params: unknown[]) {
+  const endpoint = getAlchemyRpcEndpoint();
+  if (!endpoint) {
+    throw new Error('ALCHEMY_API_KEY_MISSING');
+  }
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Alchemy RPC HTTP ${response.status}`);
+  }
+  const payload = (await response.json()) as { result?: unknown; error?: { message?: string } };
+  if (payload.error) {
+    throw new Error(payload.error.message || 'Alchemy RPC error');
+  }
+  return payload.result;
+}
+
+app.get('/api/alchemy/status', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    network: 'eth-mainnet',
+    alchemyConfigured: Boolean(process.env.ALCHEMY_API_KEY?.trim()),
+    gasPolicyConfigured: Boolean(process.env.ALCHEMY_GAS_POLICY_ID?.trim()),
+    alchemyWebhookConfigured: Boolean(
+      process.env.ALCHEMY_WEBHOOK_ID?.trim() && process.env.ALCHEMY_WEBHOOK_SIGNING_KEY?.trim()
+    ),
+    openaiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    openaiWebhookConfigured: Boolean(process.env.OPENAI_WEBHOOK_SECRET?.trim()),
+  });
+});
+
+app.post('/api/alchemy/transfers', aiLimiter, async (req, res) => {
+  const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+  if (!isValidEthAddress(address)) {
+    return res.status(400).json({ error: 'A valid EVM 0x address (40 hex chars) is required.' });
+  }
+  if (!process.env.ALCHEMY_API_KEY?.trim()) {
+    return res.status(503).json({ error: 'ALCHEMY_API_KEY is not configured on the server.' });
+  }
+
+  const direction = req.body?.direction === 'from' ? 'fromAddress' : 'toAddress';
+  const rawMax = Number(req.body?.maxCount);
+  const clampedMax = Number.isFinite(rawMax) ? Math.min(Math.max(Math.trunc(rawMax), 1), 25) : 10;
+
+  try {
+    const result = await callAlchemyJsonRpc('alchemy_getAssetTransfers', [
+      {
+        fromBlock: '0x0',
+        toBlock: 'latest',
+        [direction]: address,
+        category: ['external', 'erc20', 'erc721', 'erc1155'],
+        withMetadata: true,
+        excludeZeroValue: true,
+        maxCount: `0x${clampedMax.toString(16)}`,
+        order: 'desc',
+      },
+    ]);
+    return res.json({ network: 'eth-mainnet', address, result });
+  } catch (err: any) {
+    console.error('Alchemy Transfers API error:', err?.message || err);
+    return res.status(502).json({ error: 'Failed to query Alchemy Transfers API.' });
+  }
+});
+
+app.post('/api/alchemy/tokens', aiLimiter, async (req, res) => {
+  const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+  if (!isValidEthAddress(address)) {
+    return res.status(400).json({ error: 'A valid EVM 0x address (40 hex chars) is required.' });
+  }
+  if (!process.env.ALCHEMY_API_KEY?.trim()) {
+    return res.status(503).json({ error: 'ALCHEMY_API_KEY is not configured on the server.' });
+  }
+
+  try {
+    const balances = (await callAlchemyJsonRpc('alchemy_getTokenBalances', [address, 'erc20'])) as {
+      tokenBalances?: Array<{ contractAddress: string; tokenBalance: string }>;
+    };
+    const nonZero = (balances?.tokenBalances || [])
+      .filter((item) => item.tokenBalance && !/^0x0+$/.test(item.tokenBalance))
+      .slice(0, 5);
+
+    const enriched = await Promise.all(
+      nonZero.map(async (tb) => {
+        const metadata = await callAlchemyJsonRpc('alchemy_getTokenMetadata', [tb.contractAddress]).catch(() => null);
+        return {
+          contractAddress: tb.contractAddress,
+          tokenBalance: tb.tokenBalance,
+          metadata,
+        };
+      })
+    );
+    return res.json({ network: 'eth-mainnet', address, tokens: enriched });
+  } catch (err: any) {
+    console.error('Alchemy Token API error:', err?.message || err);
+    return res.status(502).json({ error: 'Failed to query Alchemy Token API.' });
+  }
+});
+
+app.get('/api/alchemy/nfts', aiLimiter, async (req, res) => {
+  const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
+  if (!isValidEthAddress(owner)) {
+    return res.status(400).json({ error: 'Query parameter "owner" must be a valid EVM 0x address.' });
+  }
+  const apiKey = process.env.ALCHEMY_API_KEY?.trim();
+  if (!apiKey) {
+    return res.status(503).json({ error: 'ALCHEMY_API_KEY is not configured on the server.' });
+  }
+
+  const rawPageSize = Number(req.query?.pageSize);
+  const pageSize = Number.isFinite(rawPageSize) ? Math.min(Math.max(Math.trunc(rawPageSize), 1), 25) : 10;
+
+  try {
+    const nftUrl = new URL(`https://eth-mainnet.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
+    nftUrl.searchParams.set('owner', owner);
+    nftUrl.searchParams.set('withMetadata', 'true');
+    nftUrl.searchParams.set('pageSize', String(pageSize));
+
+    const response = await fetch(nftUrl.toString(), {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return res.status(502).json({ error: `Alchemy NFT API returned status ${response.status}.` });
+    }
+    const payload = await response.json();
+    return res.json({ network: 'eth-mainnet', owner, ...payload });
+  } catch (err: any) {
+    console.error('Alchemy NFT API error:', err?.message || err);
+    return res.status(502).json({ error: 'Failed to query Alchemy NFT API.' });
+  }
+});
+
+app.post('/api/webhooks/alchemy', (req: Request & { rawBody?: Buffer }, res) => {
+  const signingKey = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY?.trim();
+  if (!signingKey) {
+    return res.status(503).json({ error: 'Alchemy webhook verification key is not configured.' });
+  }
+
+  const signatureHeader = req.headers['x-alchemy-signature'];
+  const providedSig = typeof signatureHeader === 'string' ? signatureHeader.trim().toLowerCase() : '';
+  if (!providedSig) {
+    return res.status(401).json({ error: 'Missing x-alchemy-signature header.' });
+  }
+
+  const rawPayload = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}), 'utf8');
+  const expectedSig = crypto.createHmac('sha256', signingKey).update(rawPayload).digest('hex');
+
+  if (!timingSafeEqualNormalized(providedSig, expectedSig)) {
+    return res.status(403).json({ error: 'Invalid Alchemy webhook signature.' });
+  }
+
+  const configuredWebhookId = process.env.ALCHEMY_WEBHOOK_ID?.trim();
+  const payloadWebhookId = typeof req.body?.webhookId === 'string' ? req.body.webhookId.trim() : '';
+  if (configuredWebhookId && payloadWebhookId && !timingSafeEqualNormalized(payloadWebhookId, configuredWebhookId)) {
+    return res.status(403).json({ error: 'Webhook ID mismatch.' });
+  }
+
+  return res.status(200).json({ received: true, type: sanitizeInputString(req.body?.type || 'event', 64) });
+});
+
+app.post('/api/webhooks/openai', (req: Request & { rawBody?: Buffer }, res) => {
+  const webhookSecret = process.env.OPENAI_WEBHOOK_SECRET?.trim();
+  if (!webhookSecret) {
+    return res.status(503).json({ error: 'OpenAI webhook secret is not configured.' });
+  }
+
+  const webhookId = typeof req.headers['webhook-id'] === 'string' ? req.headers['webhook-id'].trim() : '';
+  const webhookTs = typeof req.headers['webhook-timestamp'] === 'string' ? req.headers['webhook-timestamp'].trim() : '';
+  const webhookSigHeader =
+    typeof req.headers['webhook-signature'] === 'string' ? req.headers['webhook-signature'].trim() : '';
+
+  if (!webhookId || !webhookTs || !webhookSigHeader) {
+    return res.status(401).json({ error: 'Missing Standard Webhooks signature headers.' });
+  }
+
+  const tsNum = Number(webhookTs);
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(tsNum) || Math.abs(nowSec - tsNum) > 300) {
+    return res.status(403).json({ error: 'Webhook timestamp outside 5-minute tolerance window.' });
+  }
+
+  const rawSecret = webhookSecret.startsWith('whsec_') ? webhookSecret.slice(6) : webhookSecret;
+  const secretKey = Buffer.from(rawSecret, 'base64');
+  const rawPayload = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body ?? {});
+  const signedContent = `${webhookId}.${webhookTs}.${rawPayload}`;
+  const expectedSig = crypto.createHmac('sha256', secretKey).update(signedContent).digest('base64');
+
+  const candidates = webhookSigHeader
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((entry) => (entry.startsWith('v1,') ? entry.slice(3) : entry));
+
+  const matched = candidates.some((candidate) => timingSafeEqualNormalized(candidate, expectedSig));
+  if (!matched) {
+    return res.status(403).json({ error: 'Invalid OpenAI webhook signature.' });
+  }
+
+  return res.status(200).json({ received: true, type: sanitizeInputString(req.body?.type || 'event', 64) });
+});
+
+// -------------------------------------------------------------
+// 9. MailerLite Server-Side Email & Subscriber Gateway
+// -------------------------------------------------------------
+const MAILERLITE_API_BASE = 'https://connect.mailerlite.com/api';
+
+function isValidEmailAddress(value: unknown): value is string {
+  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim()) && value.trim().length <= 160;
+}
+
+app.get('/api/mailerlite/status', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    configured: Boolean(process.env.MAILERLITE_API_TOKEN?.trim()),
+  });
+});
+
+app.post('/api/mailerlite/subscribers', aiLimiter, async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!isValidEmailAddress(email)) {
+    return res.status(400).json({ error: 'A valid subscriber email address is required.' });
+  }
+
+  const token = process.env.MAILERLITE_API_TOKEN?.trim();
+  if (!token) {
+    return res.status(503).json({ error: 'MAILERLITE_API_TOKEN is not configured on the server.' });
+  }
+
+  const name = sanitizeInputString(req.body?.name, 100);
+  const rawGroups = Array.isArray(req.body?.groups) ? req.body.groups : [];
+  const groups = rawGroups
+    .filter((id: unknown): id is string => typeof id === 'string' && /^\d{1,30}$/.test(id.trim()))
+    .slice(0, 10);
+
+  try {
+    const payload: Record<string, unknown> = { email };
+    if (name) {
+      payload.fields = { name };
+    }
+    if (groups.length > 0) {
+      payload.groups = groups;
+    }
+
+    const response = await fetch(`${MAILERLITE_API_BASE}/subscribers`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    const data = (await response.json().catch(() => ({}))) as { data?: { id?: string; status?: string }; message?: string };
+    if (!response.ok) {
+      return res.status(response.status >= 400 && response.status < 500 ? response.status : 502).json({
+        error: sanitizeInputString(data.message || 'MailerLite subscriber sync failed.', 160),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      subscriberId: data.data?.id || null,
+      status: data.data?.status || 'active',
+    });
+  } catch (err: any) {
+    console.error('MailerLite subscriber sync error:', err?.message || err);
+    return res.status(502).json({ error: 'Failed to contact MailerLite API.' });
+  }
+});
+
+app.get('/api/mailerlite/subscribers', requireAdminAuth, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = process.env.MAILERLITE_API_TOKEN?.trim();
+  if (!token) {
+    return res.status(503).json({ error: 'MAILERLITE_API_TOKEN is not configured on the server.' });
+  }
+
+  const rawLimit = Number(req.query?.limit);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 50) : 20;
+
+  try {
+    const response = await fetch(`${MAILERLITE_API_BASE}/subscribers?limit=${limit}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return res.status(502).json({ error: `MailerLite API returned status ${response.status}.` });
+    }
+    const payload = await response.json();
+    return res.json(payload);
+  } catch (err: any) {
+    console.error('MailerLite list subscribers error:', err?.message || err);
+    return res.status(502).json({ error: 'Failed to fetch MailerLite subscribers.' });
+  }
+});
+
+app.get('/api/mailerlite/groups', requireAdminAuth, async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const token = process.env.MAILERLITE_API_TOKEN?.trim();
+  if (!token) {
+    return res.status(503).json({ error: 'MAILERLITE_API_TOKEN is not configured on the server.' });
+  }
+
+  try {
+    const response = await fetch(`${MAILERLITE_API_BASE}/groups`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return res.status(502).json({ error: `MailerLite API returned status ${response.status}.` });
+    }
+    const payload = await response.json();
+    return res.json(payload);
+  } catch (err: any) {
+    console.error('MailerLite groups error:', err?.message || err);
+    return res.status(502).json({ error: 'Failed to fetch MailerLite groups.' });
+  }
 });
 
 // Return JSON 404 for unmatched /api routes instead of falling through to the SPA catch-all

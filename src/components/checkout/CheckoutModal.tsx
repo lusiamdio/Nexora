@@ -47,10 +47,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [email, setEmail] = useState(activeUser?.email || '');
   const [phone, setPhone] = useState('');
   const [promoCodeInput, setPromoCodeInput] = useState('');
-  const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPct: number } | null>(null);
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    discountPct: number;
+    discountMinor?: number;
+  } | null>(null);
   const [promoError, setPromoError] = useState('');
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [referralCopied, setReferralCopied] = useState(false);
+  const [applyCredits, setApplyCredits] = useState(false);
 
   // Payment Selection
   const [paymentProvider, setPaymentProvider] = useState<'paystack' | 'flutterwave' | 'mpesa' | 'ozow'>('paystack');
@@ -93,14 +98,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }, 0);
 
   const discountMinor = appliedPromo
-    ? Math.round((subtotalMinor * appliedPromo.discountPct) / 100)
+    ? appliedPromo.discountMinor && appliedPromo.discountMinor > 0
+      ? Math.min(subtotalMinor, appliedPromo.discountMinor)
+      : Math.round((subtotalMinor * appliedPromo.discountPct) / 100)
     : 0;
 
   const platformFeeMinor = subtotalMinor > 0
     ? Math.round((subtotalMinor - discountMinor) * 0.035)
     : 0;
 
-  const totalMinor = Math.max(0, subtotalMinor - discountMinor + platformFeeMinor);
+  const grossTotalMinor = Math.max(0, subtotalMinor - discountMinor + platformFeeMinor);
+  const creditWallet = store.getCreditWalletForEmail(
+    (email || activeUser?.email || '').trim(),
+    name || activeUser?.name || 'Attendee',
+    event.currency
+  );
+  const creditsAppliedTokens = applyCredits
+    ? Math.min(creditWallet.balanceTokens, grossTotalMinor)
+    : 0;
+  const totalMinor = Math.max(0, grossTotalMinor - creditsAppliedTokens);
 
   // Apply promo code from real organizer catalog
   const handleApplyPromo = () => {
@@ -110,7 +126,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     const promo = store.validatePromoCode(cleanCode, event.id);
     if (promo) {
-      setAppliedPromo({ code: promo.code, discountPct: promo.discountPercentage });
+      setAppliedPromo({
+        code: promo.code,
+        discountPct: promo.discountPercentage,
+        discountMinor: promo.discountMinor,
+      });
       setPromoCodeInput('');
     } else {
       setPromoError('Invalid or expired promotional code');
@@ -132,6 +152,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       customerPhone: phone,
       items: selectedItems,
       promoCode: appliedPromo?.code,
+      creditsToRedeemTokens: creditsAppliedTokens,
     });
 
     if (res.success && res.order) {
@@ -167,19 +188,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     await new Promise(r => setTimeout(r, 700));
 
     // Authoritative backend call in store
+    const isCreditOnlyOrder = order.totalMinor === 0 && (order.creditsRedeemedTokens || 0) > 0;
     const finalizeRes = store.finalizeOrderPayment(
       order.id,
-      paymentProvider,
-      paymentProvider === 'mpesa'
-        ? 'M-Pesa'
-        : paymentProvider === 'flutterwave'
-          ? momoChannel
-          : paymentProvider === 'ozow'
-            ? 'Instant EFT'
-            : 'Bank Card'
+      isCreditOnlyOrder ? 'nexora_credits' : paymentProvider,
+      isCreditOnlyOrder
+        ? `NXR Cashless Credits (${(order.creditsRedeemedTokens || 0).toLocaleString()} NXR)`
+        : paymentProvider === 'mpesa'
+          ? 'M-Pesa'
+          : paymentProvider === 'flutterwave'
+            ? momoChannel
+            : paymentProvider === 'ozow'
+              ? 'Instant EFT'
+              : 'Bank Card'
     );
 
     if (finalizeRes.success && finalizeRes.tickets.length > 0) {
+      if (finalizeRes.order) setOrder(finalizeRes.order);
       setIssuedTickets(finalizeRes.tickets);
       onTicketsIssued(finalizeRes.tickets);
 
@@ -371,7 +396,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
                 {appliedPromo && (
                   <p className="text-xs text-emerald-600 font-medium">
-                    Promo code {appliedPromo.code} applied ({appliedPromo.discountPct}% off)
+                    Promo code {appliedPromo.code} applied (
+                    {appliedPromo.discountMinor && appliedPromo.discountMinor > 0
+                      ? `${formatCurrency(appliedPromo.discountMinor, event.currency)} off`
+                      : `${appliedPromo.discountPct}% off`}
+                    )
                   </p>
                 )}
                 {promoError && (
@@ -403,6 +432,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     {formatCurrency(platformFeeMinor, event.currency)}
                   </span>
                 </div>
+
+                {creditWallet.balanceTokens > 0 && (
+                  <div className="flex items-center justify-between pt-1">
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#111827] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={applyCredits}
+                        onChange={e => setApplyCredits(e.target.checked)}
+                        className="w-3.5 h-3.5 accent-[#F6A623]"
+                      />
+                      <span>Apply NXR Credits ({creditWallet.balanceTokens.toLocaleString()} NXR)</span>
+                    </label>
+                    {creditsAppliedTokens > 0 && (
+                      <span className="font-mono-tabular font-semibold text-emerald-600">
+                        -{formatCurrency(creditsAppliedTokens, event.currency)}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div className="pt-2 border-t border-[#D1D5DB] flex justify-between text-base font-bold text-[#111827]">
                   <span>Total Amount</span>
@@ -606,6 +654,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </p>
                 <div className="text-xs font-mono text-emerald-800 pt-1">
                   Booking Reference: {order?.orderReference}
+                  {(order?.creditsMintedTokens || 0) > 0 && (
+                    <span className="block text-amber-700 font-bold mt-1">
+                      +{order?.creditsMintedTokens?.toLocaleString()} NXR Loyalty Credits minted to your vault
+                    </span>
+                  )}
                 </div>
               </div>
 

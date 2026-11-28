@@ -379,7 +379,9 @@ export async function insertLedgerEntryInSupabase(entry: {
     | 'processing_fee'
     | 'payout_transfer'
     | 'refund_reserve'
-    | 'refund_reversal';
+    | 'refund_reversal'
+    | 'credit_token_mint'
+    | 'credit_token_redeem';
   account_code: string;
   account_name: string;
   debit_minor: number;
@@ -587,3 +589,143 @@ export async function canOrganizerReceivePaymentInSupabase(eventId: string, tota
     return null;
   }
 }
+
+/**
+ * Requests a server-signed HMAC-SHA256 NXR credit token signature from /api/tokens/credits/sign
+ */
+export async function signCreditTokenPayload(params: {
+  email: string;
+  txType: string;
+  tokensAmount: number;
+  currency?: string;
+  reference?: string;
+}): Promise<{ tokenSignature: string; fingerprint: string; issuedAt: string } | null> {
+  try {
+    const res = await fetch('/api/tokens/credits/sign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function mintCreditTokensInSupabase(params: {
+  email: string;
+  tokensAmount: number;
+  txType?: string;
+  currency?: string;
+  displayName?: string;
+  orderId?: string;
+  eventId?: string;
+  organizerId?: string;
+  voucherCode?: string;
+  tokenSignature?: string;
+  description?: string;
+}) {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const session = await supabaseGetSession();
+    if (!session) return null;
+    const { data, error } = await supabase.rpc('mint_credit_tokens', {
+      p_email: params.email,
+      p_tokens_amount: params.tokensAmount,
+      p_tx_type: params.txType || 'mint_cashback',
+      p_currency: params.currency || 'ZAR',
+      p_display_name: params.displayName || 'Attendee',
+      p_order_id: isValidUuid(params.orderId) ? params.orderId : null,
+      p_event_id: isValidUuid(params.eventId) ? params.eventId : null,
+      p_organizer_id: isValidUuid(params.organizerId) ? params.organizerId : null,
+      p_voucher_code: params.voucherCode || null,
+      p_token_signature: params.tokenSignature || null,
+      p_description: params.description || 'NXR Cashless & Loyalty Credit issuance',
+    });
+    if (error) return { synced: false, error: error.message };
+    return { synced: true, data };
+  } catch {
+    return null;
+  }
+}
+
+export async function redeemCreditTokensInSupabase(params: {
+  email: string;
+  tokensAmount: number;
+  txType?: 'redeem_checkout' | 'convert_wristband';
+  currency?: string;
+  orderId?: string;
+  eventId?: string;
+  organizerId?: string;
+  wristbandUid?: string;
+  description?: string;
+}) {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const session = await supabaseGetSession();
+    if (!session) return null;
+    const { data, error } = await supabase.rpc('redeem_credit_tokens', {
+      p_email: params.email,
+      p_tokens_amount: params.tokensAmount,
+      p_tx_type: params.txType || 'redeem_checkout',
+      p_currency: params.currency || 'ZAR',
+      p_order_id: isValidUuid(params.orderId) ? params.orderId : null,
+      p_event_id: isValidUuid(params.eventId) ? params.eventId : null,
+      p_organizer_id: isValidUuid(params.organizerId) ? params.organizerId : null,
+      p_wristband_uid: params.wristbandUid || null,
+      p_description: params.description || 'Redeemed NXR Cashless & Loyalty Credits',
+    });
+    if (error) return { synced: false, error: error.message };
+    return { synced: true, data };
+  } catch {
+    return null;
+  }
+}
+
+export async function claimCreditVoucherInSupabase(params: {
+  code: string;
+  email: string;
+  displayName?: string;
+}) {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const session = await supabaseGetSession();
+    if (!session) return null;
+    const { data, error } = await supabase.rpc('claim_credit_voucher', {
+      p_code: params.code,
+      p_email: params.email,
+      p_display_name: params.displayName || 'Attendee',
+    });
+    if (error) return { synced: false, error: error.message };
+    return { synced: true, data };
+  } catch {
+    return null;
+  }
+}
+
+export async function transferCreditTokensInSupabase(params: {
+  fromEmail: string;
+  toEmail: string;
+  tokensAmount: number;
+  toName?: string;
+  note?: string;
+}) {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const session = await supabaseGetSession();
+    if (!session) return null;
+    const { data, error } = await supabase.rpc('transfer_credit_tokens', {
+      p_from_email: params.fromEmail,
+      p_to_email: params.toEmail,
+      p_tokens_amount: params.tokensAmount,
+      p_to_name: params.toName || 'Attendee',
+      p_note: params.note || 'Peer-to-peer NXR Credit transfer',
+    });
+    if (error) return { synced: false, error: error.message };
+    return { synced: true, data };
+  } catch {
+    return null;
+  }
+}
+

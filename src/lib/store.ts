@@ -24,7 +24,12 @@ import {
   SuperAdminAuditEntry,
   WaitlistEntry,
   CommunityHighlight,
-  CashlessWristband
+  CashlessWristband,
+  CreditTokenTier,
+  CreditTokenTxType,
+  CreditTokenWallet,
+  CreditTokenTransaction,
+  CreditTokenVoucher
 } from '../types';
 
 import heroFestivalImg from '../assets/images/hero_afro_festival_1791591623547.jpg';
@@ -51,6 +56,7 @@ import {
   sanitizeText,
   isSafeHttpsUrl,
 } from './security';
+import { tokenizationService } from './TokenizationService';
 
 const STORAGE_KEY_PREFIX = 'nexora_db_v6_';
 
@@ -959,6 +965,9 @@ class NexoraStore {
   private waitlist: WaitlistEntry[] = [];
   private communityHighlights: CommunityHighlight[] = [];
   private wristbands: CashlessWristband[] = [];
+  private creditWallets: CreditTokenWallet[] = [];
+  private creditTransactions: CreditTokenTransaction[] = [];
+  private creditVouchers: CreditTokenVoucher[] = [];
   private userRole: 'attendee' | 'organizer' | 'scanner' | 'admin' = 'organizer';
   private selectedCurrency = 'ZAR';
   private currentUser: AuthUser | null = null;
@@ -1028,6 +1037,9 @@ class NexoraStore {
     this.waitlist = loadFromStorage('waitlist', []);
     this.communityHighlights = loadFromStorage('community_highlights', INITIAL_COMMUNITY_HIGHLIGHTS);
     this.wristbands = loadFromStorage('wristbands', []);
+    this.creditWallets = loadFromStorage('credit_wallets', []);
+    this.creditTransactions = loadFromStorage('credit_transactions', []);
+    this.creditVouchers = loadFromStorage('credit_vouchers', []);
     this.currentUser = loadFromStorage<AuthUser | null>('auth_user', null);
 
     this.integrations = loadFromStorage('integrations_map', {});
@@ -1158,6 +1170,10 @@ class NexoraStore {
     if (!promo) return null;
     if (promo.timesUsed >= promo.maxUses) return null;
     if (promo.eventId && eventId && promo.eventId !== eventId) return null;
+    if (promo.discountMinor && promo.currency && eventId) {
+      const evt = this.getEventById(eventId);
+      if (evt && evt.currency !== promo.currency) return null;
+    }
     return promo;
   }
 
@@ -1165,8 +1181,12 @@ class NexoraStore {
     const promo = this.promoCodes.find(p => p.code.toUpperCase() === code.trim().toUpperCase());
     if (promo) {
       promo.timesUsed += 1;
+      if (promo.timesUsed >= promo.maxUses) {
+        promo.active = false;
+      }
       saveToStorage('promos', this.promoCodes);
     }
+    tokenizationService.markDiscountVoucherUsed(code);
   }
 
   public getPromoCodes(): PromoCode[] {
@@ -1176,6 +1196,10 @@ class NexoraStore {
   public createPromoCode(input: {
     code: string;
     discountPercentage: number;
+    discountMinor?: number;
+    currency?: string;
+    pointsSpent?: number;
+    ownerEmail?: string;
     maxUses?: number;
     eventId?: string;
   }): PromoCode {
@@ -1183,6 +1207,10 @@ class NexoraStore {
     const existing = this.promoCodes.find(p => p.code.toUpperCase() === cleanCode);
     if (existing) {
       existing.discountPercentage = input.discountPercentage;
+      existing.discountMinor = input.discountMinor;
+      existing.currency = input.currency;
+      existing.pointsSpent = input.pointsSpent;
+      existing.ownerEmail = input.ownerEmail;
       existing.maxUses = input.maxUses || existing.maxUses;
       existing.active = true;
       saveToStorage('promos', this.promoCodes);
@@ -1192,10 +1220,15 @@ class NexoraStore {
       id: 'promo-' + Date.now(),
       code: cleanCode,
       discountPercentage: input.discountPercentage,
+      discountMinor: input.discountMinor,
+      currency: input.currency,
+      pointsSpent: input.pointsSpent,
+      ownerEmail: input.ownerEmail,
       maxUses: input.maxUses || 100,
       timesUsed: 0,
       eventId: input.eventId,
       active: true,
+      createdAt: new Date().toISOString(),
     };
     this.promoCodes.unshift(created);
     saveToStorage('promos', this.promoCodes);
@@ -1209,17 +1242,28 @@ class NexoraStore {
   public calculateOrderSummary(
     items: Array<{ tierId: string; quantity: number }>,
     eventId: string,
-    promoCode?: string
+    promoCode?: string,
+    creditsToRedeemTokens = 0
   ): {
     subtotalMinor: number;
     discountMinor: number;
     feeMinor: number;
+    creditsRedeemedMinor: number;
+    creditsRedeemedTokens: number;
     totalMinor: number;
     discountPct: number;
   } {
     const event = this.getEventById(eventId);
     if (!event) {
-      return { subtotalMinor: 0, discountMinor: 0, feeMinor: 0, totalMinor: 0, discountPct: 0 };
+      return {
+        subtotalMinor: 0,
+        discountMinor: 0,
+        feeMinor: 0,
+        creditsRedeemedMinor: 0,
+        creditsRedeemedTokens: 0,
+        totalMinor: 0,
+        discountPct: 0,
+      };
     }
 
     let subtotalMinor = 0;
@@ -1235,16 +1279,32 @@ class NexoraStore {
     if (promoCode) {
       const promo = this.validatePromoCode(promoCode, event.id);
       if (promo) {
-        discountPct = promo.discountPercentage;
-        discountMinor = Math.round((subtotalMinor * promo.discountPercentage) / 100);
+        if (promo.discountMinor && promo.discountMinor > 0) {
+          discountMinor = Math.min(subtotalMinor, promo.discountMinor);
+          discountPct = subtotalMinor > 0 ? Math.round((discountMinor / subtotalMinor) * 100) : 0;
+        } else {
+          discountPct = promo.discountPercentage;
+          discountMinor = Math.round((subtotalMinor * promo.discountPercentage) / 100);
+        }
       }
     }
 
     const netSubtotal = Math.max(0, subtotalMinor - discountMinor);
     const feeMinor = netSubtotal > 0 ? Math.round(netSubtotal * this.getServiceFeeRate()) : 0;
-    const totalMinor = Math.max(0, netSubtotal + feeMinor);
+    const grossTotalMinor = Math.max(0, netSubtotal + feeMinor);
+    const requestedCredits = Math.max(0, Math.floor(Number(creditsToRedeemTokens) || 0));
+    const creditsRedeemedMinor = Math.min(grossTotalMinor, requestedCredits);
+    const totalMinor = Math.max(0, grossTotalMinor - creditsRedeemedMinor);
 
-    return { subtotalMinor, discountMinor, feeMinor, totalMinor, discountPct };
+    return {
+      subtotalMinor,
+      discountMinor,
+      feeMinor,
+      creditsRedeemedMinor,
+      creditsRedeemedTokens: creditsRedeemedMinor,
+      totalMinor,
+      discountPct,
+    };
   }
 
   // Inventory & Orders
@@ -1255,6 +1315,7 @@ class NexoraStore {
     customerPhone: string;
     items: Array<{ tierId: string; quantity: number }>;
     promoCode?: string;
+    creditsToRedeemTokens?: number;
     customAnswers?: Record<string, string>;
   }): { order: Order; success: boolean; error?: string } {
     const event = this.getEventById(orderInput.eventId);
@@ -1307,15 +1368,35 @@ class NexoraStore {
     if (orderInput.promoCode) {
       const promo = this.validatePromoCode(orderInput.promoCode, event.id);
       if (promo) {
-        discountMinor = Math.round((subtotalMinor * promo.discountPercentage) / 100);
+        if (promo.discountMinor && promo.discountMinor > 0) {
+          discountMinor = Math.min(subtotalMinor, promo.discountMinor);
+        } else {
+          discountMinor = Math.round((subtotalMinor * promo.discountPercentage) / 100);
+        }
       }
     }
 
     const netSubtotal = Math.max(0, subtotalMinor - discountMinor);
     const feeMinor = netSubtotal > 0 ? Math.round(netSubtotal * this.getServiceFeeRate()) : 0;
-    const totalMinor = Math.max(0, netSubtotal + feeMinor);
+    const grossTotalMinor = Math.max(0, netSubtotal + feeMinor);
 
-    const paymentGate = this.canOrganizerReceivePayment(event, totalMinor);
+    let creditsRedeemedTokens = Math.max(0, Math.floor(Number(orderInput.creditsToRedeemTokens) || 0));
+    if (creditsRedeemedTokens > 0) {
+      const wallet = this.getCreditWalletForEmail(cleanEmail, cleanName, event.currency);
+      if (wallet.balanceTokens < creditsRedeemedTokens) {
+        return {
+          order: null as any,
+          success: false,
+          error: `Insufficient NXR credit balance. Available: ${wallet.balanceTokens.toLocaleString()} NXR.`,
+        };
+      }
+      creditsRedeemedTokens = Math.min(grossTotalMinor, creditsRedeemedTokens);
+    }
+
+    const creditsRedeemedMinor = creditsRedeemedTokens;
+    const totalMinor = Math.max(0, grossTotalMinor - creditsRedeemedMinor);
+
+    const paymentGate = this.canOrganizerReceivePayment(event, grossTotalMinor);
     if (!paymentGate.allowed) {
       return {
         order: null as any,
@@ -1355,6 +1436,9 @@ class NexoraStore {
       paymentProvider: 'sandbox',
       transactionReference: generateTransactionReference(),
       promoCodeApplied: orderInput.promoCode,
+      creditsRedeemedTokens,
+      creditsRedeemedMinor,
+      creditsMintedTokens: 0,
       customAnswers: sanitizedAnswers,
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
@@ -1383,7 +1467,7 @@ class NexoraStore {
     const event = this.getEventById(order.eventId);
     if (!event) return { success: false, tickets: [], error: 'Associated event not found' };
 
-    const paymentGate = this.canOrganizerReceivePayment(event, order.totalMinor);
+    const paymentGate = this.canOrganizerReceivePayment(event, order.totalMinor + (order.creditsRedeemedMinor || 0));
     if (!paymentGate.allowed) {
       return {
         success: false,
@@ -1392,6 +1476,27 @@ class NexoraStore {
           paymentGate.reason ||
           'This organizer must add and confirm their bank account details before receiving ticket payments.',
       };
+    }
+
+    const creditsToRedeem = Math.max(0, Math.floor(order.creditsRedeemedTokens || 0));
+    if (creditsToRedeem > 0) {
+      const redeemCheck = this.redeemCreditTokens({
+        email: order.customerEmail,
+        tokensAmount: creditsToRedeem,
+        txType: 'redeem_checkout',
+        currency: order.currency,
+        orderId: order.id,
+        eventId: event.id,
+        organizerId: event.organizer.id,
+        description: `Applied ${creditsToRedeem.toLocaleString()} NXR Credits to Order #${order.orderReference}`,
+      });
+      if (!redeemCheck.success) {
+        return {
+          success: false,
+          tickets: [],
+          error: redeemCheck.error || 'Unable to redeem NXR Credits for this order.',
+        };
+      }
     }
 
     // Atomic capacity re-validation before deducting inventory
@@ -1418,8 +1523,6 @@ class NexoraStore {
     order.paymentStatus = 'succeeded';
     order.paymentProvider = paymentProvider;
     order.paymentMethod = paymentMethod;
-    this.orders[orderIndex] = order;
-    saveToStorage('orders', this.orders);
 
     if (order.promoCodeApplied) {
       this.applyPromoCode(order.promoCodeApplied);
@@ -1469,11 +1572,35 @@ class NexoraStore {
 
     const organizerProceeds = Math.max(0, order.subtotalMinor - order.discountMinor);
     const platformCommission = order.feeMinor;
-    const gatewayFee = Math.round(order.totalMinor * 0.015);
+    const gatewayFee = order.totalMinor > 0 ? Math.round(order.totalMinor * 0.015) : 0;
+
+    // Mint loyalty cashback credits on cash-settled amount
+    let cashbackMintedTokens = 0;
+    if (order.totalMinor > 0) {
+      const wallet = this.getCreditWalletForEmail(order.customerEmail, order.customerName, order.currency);
+      const rate = this.getLoyaltyCashbackRate(wallet.loyaltyTier);
+      cashbackMintedTokens = Math.max(50, Math.round(order.totalMinor * rate));
+      this.mintCreditTokens({
+        email: order.customerEmail,
+        displayName: order.customerName,
+        tokensAmount: cashbackMintedTokens,
+        txType: 'mint_cashback',
+        currency: order.currency,
+        orderId: order.id,
+        eventId: event.id,
+        organizerId: event.organizer.id,
+        description: `Earned ${(rate * 100).toFixed(1)}% NXR Loyalty Cashback on Order #${order.orderReference}`,
+      });
+    }
+    order.creditsMintedTokens = cashbackMintedTokens;
+    this.orders[orderIndex] = order;
+    saveToStorage('orders', this.orders);
 
     const timestamp = new Date().toISOString();
-    const ledgerBatch: LedgerEntry[] = [
-      {
+    const ledgerBatch: LedgerEntry[] = [];
+
+    if (order.totalMinor > 0) {
+      ledgerBatch.push({
         id: 'ledg-' + Date.now() + '-1',
         orderId: order.id,
         eventId: event.id,
@@ -1484,7 +1611,25 @@ class NexoraStore {
         currency: order.currency,
         description: `Customer payment received for Order #${order.orderReference}`,
         timestamp,
-      },
+      });
+    }
+
+    if (creditsToRedeem > 0) {
+      ledgerBatch.push({
+        id: 'ledg-' + Date.now() + '-1b',
+        orderId: order.id,
+        eventId: event.id,
+        organizerId: event.organizer.id,
+        type: 'credit_token_redeem',
+        debitMinor: creditsToRedeem,
+        creditMinor: 0,
+        currency: order.currency,
+        description: `Attendee NXR Credit Tokens redeemed (${creditsToRedeem.toLocaleString()} NXR) for Order #${order.orderReference}`,
+        timestamp,
+      });
+    }
+
+    ledgerBatch.push(
       {
         id: 'ledg-' + Date.now() + '-2',
         orderId: order.id,
@@ -1508,8 +1653,11 @@ class NexoraStore {
         currency: order.currency,
         description: `NEXORA platform commission for Order #${order.orderReference}`,
         timestamp,
-      },
-      {
+      }
+    );
+
+    if (gatewayFee > 0) {
+      ledgerBatch.push({
         id: 'ledg-' + Date.now() + '-4',
         orderId: order.id,
         eventId: event.id,
@@ -1520,8 +1668,8 @@ class NexoraStore {
         currency: order.currency,
         description: `Interchange settlement fee for Order #${order.orderReference}`,
         timestamp,
-      },
-    ];
+      });
+    }
 
     this.ledger.unshift(...ledgerBatch);
     saveToStorage('ledger', this.ledger);
@@ -1663,6 +1811,7 @@ class NexoraStore {
       this.tickets[ticketIndex] = ticket;
       saveToStorage('tickets', this.tickets);
     }
+    tokenizationService.markAttendanceVerified(ticket.id);
 
     const log: CheckInLog = {
       id: 'chk-' + Date.now(),
@@ -1765,6 +1914,10 @@ class NexoraStore {
     this.tickets[idx] = updated;
     saveToStorage('tickets', this.tickets);
 
+    if (tokenizationService.isTicketTokenized(ticketId)) {
+      void tokenizationService.recordAssetTransfer(ticketId, cleanEmail, cleanName);
+    }
+
     this.logActivity({
       type: 'transfer',
       title: 'Ticket Pass Transferred',
@@ -1833,6 +1986,10 @@ class NexoraStore {
       if (ticket) {
         ticket.status = 'refunded';
         ticket.refundReason = req.reason;
+        const revokedAsset = tokenizationService.revokeTicketAsset(ticket.id, req.reason);
+        if (revokedAsset) {
+          ticket.tokenizationStatus = 'revoked';
+        }
 
         const event = this.getEventById(ticket.eventId);
         if (event) {
@@ -3248,11 +3405,545 @@ class NexoraStore {
       reference: `POS-${wb.uid}-${Date.now().toString(36).slice(-4)}`
     });
 
+    const posRewardTokens = Math.max(10, Math.round(amountMinor * 0.02));
+    this.mintCreditTokens({
+      email: wb.attendeeEmail,
+      displayName: wb.attendeeName,
+      tokensAmount: posRewardTokens,
+      txType: 'mint_pos_reward',
+      currency: wb.currency,
+      eventId: wb.eventId,
+      wristbandUid: wb.uid,
+      description: `2% Cashless POS Loyalty Reward at ${vendorName} (+${posRewardTokens.toLocaleString()} NXR)`,
+    });
+
     return {
       success: true,
       wristband: { ...wb },
-      message: `Approved! ${wb.currency} ${(amountMinor / 100).toFixed(2)} deducted. New balance: ${wb.currency} ${(wb.balanceMinor / 100).toFixed(2)}.`
+      message: `Approved! ${wb.currency} ${(amountMinor / 100).toFixed(2)} deducted (+${posRewardTokens.toLocaleString()} NXR earned). New balance: ${wb.currency} ${(wb.balanceMinor / 100).toFixed(2)}.`
     };
+  }
+
+  // ==========================================
+  // CASHLESS & LOYALTY CREDIT TOKENIZATION (NXR)
+  // ==========================================
+  public getLoyaltyTierForLifetime(lifetimeMintedTokens: number): CreditTokenTier {
+    if (lifetimeMintedTokens >= 150000) return 'Obsidian';
+    if (lifetimeMintedTokens >= 50000) return 'Gold';
+    if (lifetimeMintedTokens >= 10000) return 'Silver';
+    return 'Bronze';
+  }
+
+  public getLoyaltyCashbackRate(tier: CreditTokenTier): number {
+    switch (tier) {
+      case 'Obsidian':
+        return 0.125;
+      case 'Gold':
+        return 0.10;
+      case 'Silver':
+        return 0.075;
+      default:
+        return 0.05;
+    }
+  }
+
+  public getNextLoyaltyTierInfo(lifetimeMintedTokens: number): {
+    currentTier: CreditTokenTier;
+    nextTier: CreditTokenTier | null;
+    tokensRemaining: number;
+    progressPct: number;
+  } {
+    const currentTier = this.getLoyaltyTierForLifetime(lifetimeMintedTokens);
+    if (currentTier === 'Bronze') {
+      return {
+        currentTier,
+        nextTier: 'Silver',
+        tokensRemaining: Math.max(0, 10000 - lifetimeMintedTokens),
+        progressPct: Math.min(100, Math.round((lifetimeMintedTokens / 10000) * 100)),
+      };
+    }
+    if (currentTier === 'Silver') {
+      return {
+        currentTier,
+        nextTier: 'Gold',
+        tokensRemaining: Math.max(0, 50000 - lifetimeMintedTokens),
+        progressPct: Math.min(100, Math.round(((lifetimeMintedTokens - 10000) / 40000) * 100)),
+      };
+    }
+    if (currentTier === 'Gold') {
+      return {
+        currentTier,
+        nextTier: 'Obsidian',
+        tokensRemaining: Math.max(0, 150000 - lifetimeMintedTokens),
+        progressPct: Math.min(100, Math.round(((lifetimeMintedTokens - 50000) / 100000) * 100)),
+      };
+    }
+    return {
+      currentTier: 'Obsidian',
+      nextTier: null,
+      tokensRemaining: 0,
+      progressPct: 100,
+    };
+  }
+
+  public getCreditWalletForEmail(
+    email?: string,
+    displayName = 'Attendee',
+    currency = 'ZAR'
+  ): CreditTokenWallet {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail || !isValidEmail(cleanEmail)) {
+      const now = new Date().toISOString();
+      return {
+        id: 'cw-guest',
+        email: '',
+        displayName,
+        tokenSymbol: 'NXR',
+        currency,
+        balanceTokens: 0,
+        lifetimeMintedTokens: 0,
+        lifetimeRedeemedTokens: 0,
+        loyaltyTier: 'Bronze',
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+
+    const existing = this.creditWallets.find(w => w.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      if (displayName && displayName !== 'Attendee' && existing.displayName !== displayName) {
+        existing.displayName = sanitizeText(displayName, 120);
+        saveToStorage('credit_wallets', this.creditWallets);
+      }
+      return { ...existing };
+    }
+
+    const now = new Date().toISOString();
+    const wallet: CreditTokenWallet = {
+      id: generateUniqueId('cw'),
+      email: cleanEmail,
+      displayName: sanitizeText(displayName, 120) || 'Attendee',
+      tokenSymbol: 'NXR',
+      currency: currency || 'ZAR',
+      balanceTokens: 0,
+      lifetimeMintedTokens: 0,
+      lifetimeRedeemedTokens: 0,
+      loyaltyTier: 'Bronze',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.creditWallets.unshift(wallet);
+    saveToStorage('credit_wallets', this.creditWallets);
+    return { ...wallet };
+  }
+
+  public getCreditTransactionsForEmail(email?: string): CreditTokenTransaction[] {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail) return [];
+    return this.creditTransactions
+      .filter(tx => tx.email.toLowerCase() === cleanEmail)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  public getCreditVouchers(organizerId?: string): CreditTokenVoucher[] {
+    const list = organizerId
+      ? this.creditVouchers.filter(v => v.organizerId === organizerId)
+      : this.creditVouchers;
+    return [...list];
+  }
+
+  public getOrganizerCreditSummary(organizerId: string): {
+    totalMintedTokens: number;
+    totalRedeemedTokens: number;
+    outstandingTokens: number;
+    activeVouchersCount: number;
+    currency: string;
+    recentTransactions: CreditTokenTransaction[];
+  } {
+    const orgTxs = this.creditTransactions.filter(tx => tx.organizerId === organizerId);
+    const totalMintedTokens = orgTxs
+      .filter(tx => tx.tokensDelta > 0)
+      .reduce((sum, tx) => sum + tx.tokensDelta, 0);
+    const totalRedeemedTokens = orgTxs
+      .filter(tx => tx.tokensDelta < 0)
+      .reduce((sum, tx) => sum + Math.abs(tx.tokensDelta), 0);
+    const orgEvents = this.getPlatformEvents().filter(e => e.organizer.id === organizerId);
+    const currency = orgTxs[0]?.currency || orgEvents[0]?.currency || 'ZAR';
+    const activeVouchersCount = this.creditVouchers.filter(
+      v => v.organizerId === organizerId && v.active && v.redemptionsCount < v.maxRedemptions
+    ).length;
+
+    return {
+      totalMintedTokens,
+      totalRedeemedTokens,
+      outstandingTokens: Math.max(0, totalMintedTokens - totalRedeemedTokens),
+      activeVouchersCount,
+      currency,
+      recentTransactions: orgTxs.slice(0, 20),
+    };
+  }
+
+  public mintCreditTokens(params: {
+    email: string;
+    tokensAmount: number;
+    txType?: Extract<CreditTokenTxType, 'mint_cashback' | 'mint_organizer_grant' | 'mint_voucher' | 'mint_pos_reward' | 'wristband_refund'>;
+    currency?: string;
+    displayName?: string;
+    orderId?: string;
+    eventId?: string;
+    organizerId?: string;
+    wristbandUid?: string;
+    voucherCode?: string;
+    tokenSignature?: string;
+    description: string;
+  }): { success: boolean; wallet?: CreditTokenWallet; transaction?: CreditTokenTransaction; error?: string } {
+    const cleanEmail = params.email.trim().toLowerCase();
+    const amount = Math.floor(Number(params.tokensAmount) || 0);
+    if (!isValidEmail(cleanEmail)) {
+      return { success: false, error: 'Valid attendee email address is required.' };
+    }
+    if (amount <= 0) {
+      return { success: false, error: 'Mint amount must be a positive integer.' };
+    }
+
+    this.getCreditWalletForEmail(cleanEmail, params.displayName, params.currency || 'ZAR');
+    const walletIndex = this.creditWallets.findIndex(w => w.email.toLowerCase() === cleanEmail);
+    if (walletIndex === -1) {
+      return { success: false, error: 'Unable to initialize NXR credit wallet.' };
+    }
+
+    const wallet = this.creditWallets[walletIndex];
+    wallet.balanceTokens += amount;
+    wallet.lifetimeMintedTokens += amount;
+    wallet.loyaltyTier = this.getLoyaltyTierForLifetime(wallet.lifetimeMintedTokens);
+    wallet.updatedAt = new Date().toISOString();
+    this.creditWallets[walletIndex] = wallet;
+    saveToStorage('credit_wallets', this.creditWallets);
+
+    const txId = generateUniqueId('ctx');
+    const sig =
+      params.tokenSignature ||
+      `nxr_sig_${generateHmacFingerprint()}`;
+
+    const tx: CreditTokenTransaction = {
+      id: txId,
+      walletId: wallet.id,
+      email: cleanEmail,
+      txType: params.txType || 'mint_cashback',
+      tokensDelta: amount,
+      balanceAfterTokens: wallet.balanceTokens,
+      currency: params.currency || wallet.currency,
+      orderId: params.orderId,
+      eventId: params.eventId,
+      organizerId: params.organizerId,
+      wristbandUid: params.wristbandUid,
+      voucherCode: params.voucherCode,
+      tokenSignature: sig,
+      description: sanitizeText(params.description, 220),
+      createdAt: wallet.updatedAt,
+    };
+
+    this.creditTransactions.unshift(tx);
+    saveToStorage('credit_transactions', this.creditTransactions);
+
+    return { success: true, wallet: { ...wallet }, transaction: tx };
+  }
+
+  public redeemCreditTokens(params: {
+    email: string;
+    tokensAmount: number;
+    txType?: Extract<CreditTokenTxType, 'redeem_checkout' | 'convert_wristband'>;
+    currency?: string;
+    orderId?: string;
+    eventId?: string;
+    organizerId?: string;
+    wristbandUid?: string;
+    description: string;
+  }): { success: boolean; wallet?: CreditTokenWallet; transaction?: CreditTokenTransaction; error?: string } {
+    const cleanEmail = params.email.trim().toLowerCase();
+    const amount = Math.floor(Number(params.tokensAmount) || 0);
+    if (!isValidEmail(cleanEmail)) {
+      return { success: false, error: 'Valid attendee email address is required.' };
+    }
+    if (amount <= 0) {
+      return { success: false, error: 'Redeem amount must be greater than zero.' };
+    }
+
+    const walletIndex = this.creditWallets.findIndex(w => w.email.toLowerCase() === cleanEmail);
+    if (walletIndex === -1 || this.creditWallets[walletIndex].balanceTokens < amount) {
+      const available = walletIndex === -1 ? 0 : this.creditWallets[walletIndex].balanceTokens;
+      return {
+        success: false,
+        error: `Insufficient NXR credit balance (${available.toLocaleString()} NXR available).`,
+      };
+    }
+
+    const wallet = this.creditWallets[walletIndex];
+    wallet.balanceTokens -= amount;
+    wallet.lifetimeRedeemedTokens += amount;
+    wallet.updatedAt = new Date().toISOString();
+    this.creditWallets[walletIndex] = wallet;
+    saveToStorage('credit_wallets', this.creditWallets);
+
+    const txId = generateUniqueId('ctx');
+    const tx: CreditTokenTransaction = {
+      id: txId,
+      walletId: wallet.id,
+      email: cleanEmail,
+      txType: params.txType || 'redeem_checkout',
+      tokensDelta: -amount,
+      balanceAfterTokens: wallet.balanceTokens,
+      currency: params.currency || wallet.currency,
+      orderId: params.orderId,
+      eventId: params.eventId,
+      organizerId: params.organizerId,
+      wristbandUid: params.wristbandUid,
+      tokenSignature: `nxr_red_${generateHmacFingerprint()}`,
+      description: sanitizeText(params.description, 220),
+      createdAt: wallet.updatedAt,
+    };
+
+    this.creditTransactions.unshift(tx);
+    saveToStorage('credit_transactions', this.creditTransactions);
+
+    return { success: true, wallet: { ...wallet }, transaction: tx };
+  }
+
+  public convertCreditsToWristband(params: {
+    email: string;
+    wristbandUid: string;
+    tokensAmount: number;
+  }): {
+    success: boolean;
+    wristband?: CashlessWristband;
+    wallet?: CreditTokenWallet;
+    message: string;
+  } {
+    const wb = this.getWristbandByUid(params.wristbandUid);
+    if (!wb) {
+      return { success: false, message: 'NFC Wristband UID not found.' };
+    }
+    const amount = Math.floor(Number(params.tokensAmount) || 0);
+    if (amount <= 0) {
+      return { success: false, message: 'Enter a positive NXR credit amount to convert.' };
+    }
+
+    const redeemRes = this.redeemCreditTokens({
+      email: params.email,
+      tokensAmount: amount,
+      txType: 'convert_wristband',
+      currency: wb.currency,
+      eventId: wb.eventId,
+      wristbandUid: wb.uid,
+      description: `Converted ${amount.toLocaleString()} NXR Credits to NFC Wristband [${wb.uid}]`,
+    });
+
+    if (!redeemRes.success) {
+      return { success: false, message: redeemRes.error || 'Insufficient NXR credit balance.' };
+    }
+
+    wb.balanceMinor += amount;
+    wb.lastTappedAt = new Date().toISOString();
+    wb.transactions.unshift({
+      id: 'wtx-' + Date.now().toString(36),
+      type: 'topup',
+      amountMinor: amount,
+      vendorName: 'NXR Loyalty Credits Bridge',
+      timestamp: wb.lastTappedAt,
+      balanceAfterMinor: wb.balanceMinor,
+    });
+    saveToStorage('wristbands', this.wristbands);
+
+    return {
+      success: true,
+      wristband: { ...wb },
+      wallet: redeemRes.wallet,
+      message: `Converted ${amount.toLocaleString()} NXR Credits onto wristband ${wb.uid}. New NFC balance: ${wb.currency} ${(wb.balanceMinor / 100).toFixed(2)}.`,
+    };
+  }
+
+  public transferCreditTokens(params: {
+    fromEmail: string;
+    toEmail: string;
+    tokensAmount: number;
+    toName?: string;
+    note?: string;
+  }): { success: boolean; wallet?: CreditTokenWallet; error?: string } {
+    const fromEmail = params.fromEmail.trim().toLowerCase();
+    const toEmail = params.toEmail.trim().toLowerCase();
+    const amount = Math.floor(Number(params.tokensAmount) || 0);
+
+    if (!isValidEmail(fromEmail) || !isValidEmail(toEmail)) {
+      return { success: false, error: 'Enter valid sender and recipient email addresses.' };
+    }
+    if (fromEmail === toEmail) {
+      return { success: false, error: 'Cannot transfer credits to your own wallet.' };
+    }
+    if (amount <= 0) {
+      return { success: false, error: 'Transfer amount must be positive.' };
+    }
+
+    const fromIndex = this.creditWallets.findIndex(w => w.email.toLowerCase() === fromEmail);
+    if (fromIndex === -1 || this.creditWallets[fromIndex].balanceTokens < amount) {
+      return { success: false, error: 'Insufficient NXR credit balance for this transfer.' };
+    }
+
+    const sender = this.creditWallets[fromIndex];
+    sender.balanceTokens -= amount;
+    sender.lifetimeRedeemedTokens += amount;
+    sender.updatedAt = new Date().toISOString();
+    this.creditWallets[fromIndex] = sender;
+
+    this.getCreditWalletForEmail(toEmail, params.toName || 'Attendee', sender.currency);
+    const toIndex = this.creditWallets.findIndex(w => w.email.toLowerCase() === toEmail);
+    const recipient = this.creditWallets[toIndex];
+    recipient.balanceTokens += amount;
+    recipient.lifetimeMintedTokens += amount;
+    recipient.loyaltyTier = this.getLoyaltyTierForLifetime(recipient.lifetimeMintedTokens);
+    recipient.updatedAt = sender.updatedAt;
+    this.creditWallets[toIndex] = recipient;
+    saveToStorage('credit_wallets', this.creditWallets);
+
+    const sig = `nxr_p2p_${generateHmacFingerprint()}`;
+
+    this.creditTransactions.unshift(
+      {
+        id: generateUniqueId('ctx'),
+        walletId: sender.id,
+        email: fromEmail,
+        txType: 'transfer_out',
+        tokensDelta: -amount,
+        balanceAfterTokens: sender.balanceTokens,
+        currency: sender.currency,
+        tokenSignature: sig,
+        description: `Transferred ${amount.toLocaleString()} NXR Credits to ${toEmail}`,
+        createdAt: sender.updatedAt,
+      },
+      {
+        id: generateUniqueId('ctx'),
+        walletId: recipient.id,
+        email: toEmail,
+        txType: 'transfer_in',
+        tokensDelta: amount,
+        balanceAfterTokens: recipient.balanceTokens,
+        currency: recipient.currency,
+        tokenSignature: sig,
+        description: sanitizeText(params.note || `Received ${amount.toLocaleString()} NXR Credits from ${fromEmail}`, 200),
+        createdAt: sender.updatedAt,
+      }
+    );
+    saveToStorage('credit_transactions', this.creditTransactions);
+
+    return { success: true, wallet: { ...sender } };
+  }
+
+  public createCreditVoucher(params: {
+    organizerId: string;
+    code: string;
+    tokensAmount: number;
+    currency?: string;
+    maxRedemptions?: number;
+    eventId?: string;
+    eventTitle?: string;
+    tokenSignature?: string;
+  }): { success: boolean; voucher?: CreditTokenVoucher; error?: string } {
+    const cleanCode = params.code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    const amount = Math.floor(Number(params.tokensAmount) || 0);
+    const maxRedemptions = Math.max(1, Math.floor(Number(params.maxRedemptions) || 1));
+
+    if (cleanCode.length < 4) {
+      return { success: false, error: 'Voucher code must be at least 4 alphanumeric characters.' };
+    }
+    if (amount <= 0) {
+      return { success: false, error: 'Voucher token value must be positive.' };
+    }
+    if (this.creditVouchers.some(v => v.code === cleanCode)) {
+      return { success: false, error: `Credit voucher "${cleanCode}" already exists.` };
+    }
+
+    const now = new Date().toISOString();
+    const voucher: CreditTokenVoucher = {
+      id: generateUniqueId('cvc'),
+      code: cleanCode,
+      organizerId: params.organizerId,
+      eventId: params.eventId,
+      eventTitle: params.eventTitle,
+      tokensAmount: amount,
+      currency: params.currency || 'ZAR',
+      maxRedemptions,
+      redemptionsCount: 0,
+      claimedByEmails: [],
+      tokenSignature:
+        params.tokenSignature ||
+        `nxr_vch_${generateHmacFingerprint()}`,
+      active: true,
+      createdAt: now,
+    };
+
+    this.creditVouchers.unshift(voucher);
+    saveToStorage('credit_vouchers', this.creditVouchers);
+    return { success: true, voucher };
+  }
+
+  public claimCreditVoucher(params: {
+    code: string;
+    email: string;
+    displayName?: string;
+  }): { success: boolean; voucher?: CreditTokenVoucher; wallet?: CreditTokenWallet; error?: string } {
+    const cleanCode = params.code.trim().toUpperCase();
+    const cleanEmail = params.email.trim().toLowerCase();
+    if (!cleanCode) return { success: false, error: 'Enter a credit voucher code.' };
+    if (!isValidEmail(cleanEmail)) {
+      return { success: false, error: 'Sign in or provide a valid email address to claim credits.' };
+    }
+
+    const idx = this.creditVouchers.findIndex(v => v.code === cleanCode && v.active);
+    if (idx === -1) {
+      return { success: false, error: `Credit voucher "${cleanCode}" was not found or is inactive.` };
+    }
+
+    const voucher = this.creditVouchers[idx];
+    if (voucher.expiresAt && new Date(voucher.expiresAt).getTime() <= Date.now()) {
+      return { success: false, error: 'This credit voucher has expired.' };
+    }
+    if (voucher.redemptionsCount >= voucher.maxRedemptions) {
+      return { success: false, error: 'This credit voucher has reached its redemption cap.' };
+    }
+    if (voucher.claimedByEmails.some(e => e.toLowerCase() === cleanEmail)) {
+      return { success: false, error: 'You have already claimed this credit voucher.' };
+    }
+
+    voucher.claimedByEmails.push(cleanEmail);
+    voucher.redemptionsCount += 1;
+    this.creditVouchers[idx] = voucher;
+    saveToStorage('credit_vouchers', this.creditVouchers);
+
+    const minted = this.mintCreditTokens({
+      email: cleanEmail,
+      displayName: params.displayName,
+      tokensAmount: voucher.tokensAmount,
+      txType: 'mint_voucher',
+      currency: voucher.currency,
+      eventId: voucher.eventId,
+      organizerId: voucher.organizerId,
+      voucherCode: voucher.code,
+      tokenSignature: voucher.tokenSignature,
+      description: `Claimed signed NXR Credit Voucher ${voucher.code} (+${voucher.tokensAmount.toLocaleString()} NXR)`,
+    });
+
+    if (!minted.success) {
+      return { success: false, error: minted.error };
+    }
+
+    return { success: true, voucher, wallet: minted.wallet };
+  }
+
+  public attachSignedTokenSignature(txId: string, tokenSignature: string): void {
+    const idx = this.creditTransactions.findIndex(t => t.id === txId);
+    if (idx !== -1 && tokenSignature) {
+      this.creditTransactions[idx].tokenSignature = tokenSignature;
+      saveToStorage('credit_transactions', this.creditTransactions);
+    }
   }
 
   public recordTransaction(entry: {
@@ -3288,6 +3979,10 @@ class NexoraStore {
     this.payouts = [];
     this.refundRequests = [];
     this.wristbands = [];
+    this.creditWallets = [];
+    this.creditTransactions = [];
+    this.creditVouchers = [];
+    tokenizationService.clearAll();
     this.waitlist = [];
     this.priorityTasks = [];
     this.marketingCampaigns = [];
@@ -3304,6 +3999,9 @@ class NexoraStore {
     saveToStorage('payouts', this.payouts);
     saveToStorage('refunds', this.refundRequests);
     saveToStorage('wristbands', this.wristbands);
+    saveToStorage('credit_wallets', this.creditWallets);
+    saveToStorage('credit_transactions', this.creditTransactions);
+    saveToStorage('credit_vouchers', this.creditVouchers);
     saveToStorage('waitlist', this.waitlist);
     saveToStorage('tasks', this.priorityTasks);
     saveToStorage('campaigns', this.marketingCampaigns);

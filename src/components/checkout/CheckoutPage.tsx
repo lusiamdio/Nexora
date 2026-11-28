@@ -19,6 +19,7 @@ import {
   Receipt,
   Loader2,
   X,
+  Coins,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
@@ -140,8 +141,16 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
   // Promo / Voucher state
   const [promoCodeInput, setPromoCodeInput] = useState('');
-  const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountPct: number } | null>(null);
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    discountPct: number;
+    discountMinor?: number;
+  } | null>(null);
   const [promoError, setPromoError] = useState('');
+
+  // Cashless & Loyalty Credits (NXR) redemption state
+  const [applyCredits, setApplyCredits] = useState(false);
+  const [customCreditsTokens, setCustomCreditsTokens] = useState<string>('');
 
   // Region-smart payment rail default
   const isMomoDefaultCurrency = event.currency === 'KES' || event.currency === 'GHS' || event.currency === 'RWF';
@@ -217,22 +226,40 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     [selectedItems, event.tickets]
   );
 
+  const attendeeCreditWallet = useMemo(() => {
+    const lookupEmail = (email || currentUser?.email || '').trim().toLowerCase();
+    return store.getCreditWalletForEmail(lookupEmail, name || currentUser?.name || 'Attendee', event.currency);
+  }, [email, currentUser?.email, currentUser?.name, name, event.currency, step]);
+
+  const basePricing = useMemo(
+    () => store.calculateOrderSummary(selectedItems, event.id, appliedPromo?.code, 0),
+    [selectedItems, event.id, appliedPromo?.code]
+  );
+
+  const maxRedeemableCredits = Math.min(attendeeCreditWallet.balanceTokens, basePricing.totalMinor);
+  const parsedCustomCredits = customCreditsTokens.trim() === ''
+    ? maxRedeemableCredits
+    : Math.max(0, Math.min(maxRedeemableCredits, Math.floor(Number(customCreditsTokens) || 0)));
+  const requestedCreditsTokens = applyCredits ? parsedCustomCredits : 0;
+
   const feeRate = store.getServiceFeeRate();
   const pricing = useMemo(
-    () => store.calculateOrderSummary(selectedItems, event.id, appliedPromo?.code),
-    [selectedItems, event.id, appliedPromo?.code]
+    () => store.calculateOrderSummary(selectedItems, event.id, appliedPromo?.code, requestedCreditsTokens),
+    [selectedItems, event.id, appliedPromo?.code, requestedCreditsTokens]
   );
 
   const subtotal = pricing.subtotalMinor;
   const discountAmount = pricing.discountMinor;
   const fees = pricing.feeMinor;
+  const creditsRedeemedMinor = pricing.creditsRedeemedMinor;
   const total = pricing.totalMinor;
   const totalTickets = selectedItems.reduce((acc, item) => acc + item.quantity, 0);
   const isFreeOrder = total === 0;
+  const isSettledFullyByCredits = isFreeOrder && creditsRedeemedMinor > 0;
 
   const paymentGate = useMemo(
-    () => store.canOrganizerReceivePayment(event, total),
-    [event, total]
+    () => store.canOrganizerReceivePayment(event, total + creditsRedeemedMinor),
+    [event, total, creditsRedeemedMinor]
   );
 
   // Ordered payment rails customized to event currency
@@ -329,7 +356,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
     const validPromo = store.validatePromoCode(code, event.id);
     if (validPromo) {
-      setAppliedPromo({ code: validPromo.code, discountPct: validPromo.discountPercentage });
+      setAppliedPromo({
+        code: validPromo.code,
+        discountPct: validPromo.discountPercentage,
+        discountMinor: validPromo.discountMinor,
+      });
       setPromoCodeInput('');
     } else {
       setPromoError('Voucher code is invalid, expired, or not eligible for this event.');
@@ -392,6 +423,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     methodLabel: string;
   } => {
     if (isFreeOrder) {
+      if (isSettledFullyByCredits) {
+        return {
+          error: null,
+          provider: 'nexora_credits',
+          methodLabel: `NXR Cashless Credits (${creditsRedeemedMinor.toLocaleString()} NXR)`,
+        };
+      }
       return {
         error: null,
         provider: 'sandbox',
@@ -494,6 +532,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
         customerPhone: (phone || momoPhone).trim(),
         items: selectedItems,
         promoCode: appliedPromo?.code,
+        creditsToRedeemTokens: requestedCreditsTokens,
         customAnswers: event.customQuestions?.length ? customAnswers : undefined,
       });
 
@@ -1018,15 +1057,19 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                       </button>
                     </div>
 
-                    {/* Payment Rail Selector OR Free Admission */}
+                    {/* Payment Rail Selector OR Full Credit / Free Admission */}
                     {isFreeOrder ? (
                       <div className={`p-6 sm:p-8 rounded-3xl space-y-3 ${surfacePanel}`}>
                         <div className="flex items-center gap-2.5 text-emerald-500">
                           <CheckCircle2 className="w-5 h-5" />
-                          <h2 className="text-base font-bold tracking-tight">Complimentary Admission</h2>
+                          <h2 className="text-base font-bold tracking-tight">
+                            {isSettledFullyByCredits ? 'Settled with NXR Cashless Credits' : 'Complimentary Admission'}
+                          </h2>
                         </div>
                         <p className={`text-sm ${mutedText}`}>
-                          Your order total is {formatCurrency(0, event.currency)}. No card or mobile wallet authorization is required—click below to mint your cryptographic QR passes immediately.
+                          {isSettledFullyByCredits
+                            ? `Your NXR Credit balance covers 100% of this booking (${creditsRedeemedMinor.toLocaleString()} NXR = ${formatCurrency(creditsRedeemedMinor, event.currency)}). Click below to settle and mint your passes immediately.`
+                            : `Your order total is ${formatCurrency(0, event.currency)}. No card or mobile wallet authorization is required—click below to mint your cryptographic QR passes immediately.`}
                         </p>
                       </div>
                     ) : (
@@ -1407,7 +1450,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     {appliedPromo && (
                       <div className="flex items-center justify-between text-xs font-mono text-emerald-500 pt-1">
                         <span>
-                          Voucher {appliedPromo.code} applied ({appliedPromo.discountPct}% off)
+                          Voucher {appliedPromo.code} applied (
+                          {appliedPromo.discountMinor && appliedPromo.discountMinor > 0
+                            ? `${formatCurrency(appliedPromo.discountMinor, event.currency)} off`
+                            : `${appliedPromo.discountPct}% off`}
+                          )
                         </span>
                         <button
                           type="button"
@@ -1420,6 +1467,54 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     )}
                     {promoError && <p className="text-xs text-red-500 font-mono">{promoError}</p>}
                   </form>
+
+                  <div className={hairlineDivider} />
+
+                  {/* NXR Cashless & Loyalty Credit Redemption */}
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="inline-flex items-center gap-2 text-xs font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          disabled={maxRedeemableCredits <= 0 || step >= 3}
+                          checked={applyCredits && maxRedeemableCredits > 0}
+                          onChange={e => {
+                            setApplyCredits(e.target.checked);
+                            if (e.target.checked && !customCreditsTokens) {
+                              setCustomCreditsTokens(String(maxRedeemableCredits));
+                            }
+                          }}
+                          className="w-4 h-4 accent-amber-500 cursor-pointer disabled:opacity-40"
+                        />
+                        <Coins className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Redeem NXR Credits</span>
+                      </label>
+                      <span className={`text-[11px] font-mono tabular-nums ${mutedText}`}>
+                        {attendeeCreditWallet.balanceTokens.toLocaleString()} NXR ({formatCurrency(attendeeCreditWallet.balanceTokens, event.currency)})
+                      </span>
+                    </div>
+
+                    {applyCredits && maxRedeemableCredits > 0 && step < 3 && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={maxRedeemableCredits}
+                          value={customCreditsTokens}
+                          onChange={e => setCustomCreditsTokens(e.target.value)}
+                          className={`flex-1 min-h-9 px-3 py-1.5 rounded-xl text-xs font-mono tabular-nums focus:outline-none ${inputSurface}`}
+                          aria-label="NXR Credits to redeem"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setCustomCreditsTokens(String(maxRedeemableCredits))}
+                          className={`min-h-9 px-3 py-1.5 rounded-xl text-[11px] font-mono font-bold cursor-pointer ${surfaceInner}`}
+                        >
+                          Max
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
                   <div className={hairlineDivider} />
 
@@ -1441,6 +1536,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                       </span>
                       <span>{formatCurrency(fees, event.currency)}</span>
                     </div>
+                    {creditsRedeemedMinor > 0 && (
+                      <div className="flex justify-between text-amber-500">
+                        <span>NXR Credits Applied ({creditsRedeemedMinor.toLocaleString()} NXR)</span>
+                        <span>-{formatCurrency(creditsRedeemedMinor, event.currency)}</span>
+                      </div>
+                    )}
                     <div className={hairlineDivider} />
                     <div className="flex justify-between items-baseline text-base font-sans font-black pt-1">
                       <span>Total Due</span>
@@ -1611,6 +1712,26 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                       {formatCurrency(order.totalMinor, order.currency)}
                     </span>
                   </div>
+                </div>
+              )}
+
+              {order && ((order.creditsMintedTokens || 0) > 0 || (order.creditsRedeemedTokens || 0) > 0) && (
+                <div className={`p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs font-mono ${surfaceInner}`}>
+                  <div className="flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span>
+                      {(order.creditsMintedTokens || 0) > 0
+                        ? `Minted +${(order.creditsMintedTokens || 0).toLocaleString()} NXR Loyalty Credits (${formatCurrency(order.creditsMintedTokens || 0, order.currency)} value)`
+                        : `Settled using ${(order.creditsRedeemedTokens || 0).toLocaleString()} NXR Credits`}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onGoToWallet}
+                    className="font-bold underline cursor-pointer text-amber-500"
+                  >
+                    View NXR Credit Vault
+                  </button>
                 </div>
               )}
 

@@ -77,6 +77,14 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
   const [selectedGateway, setSelectedGateway] = useState<string>('M-Pesa / Ozow EFT');
   const [isProcessing, setIsProcessing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [creditRefresh, setCreditRefresh] = useState(0);
+
+  const creditWallet = store.getCreditWalletForEmail(
+    wristband?.attendeeEmail || resolvedEmail,
+    wristband?.attendeeName || resolvedName,
+    wristband?.currency || 'ZAR'
+  );
+  void creditRefresh;
 
   // Vendor POS State
   const [selectedVendor, setSelectedVendor] = useState(SAMPLE_VENDORS[0].name);
@@ -116,8 +124,26 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
     setFeedback(null);
 
     setTimeout(() => {
+      if (selectedGateway === 'NXR Loyalty Credits') {
+        const res = store.convertCreditsToWristband({
+          email: wristband.attendeeEmail,
+          wristbandUid: wristband.uid,
+          tokensAmount: topUpAmount,
+        });
+        setIsProcessing(false);
+        setTapSuccess(res.success);
+        setFeedback(res.message);
+        if (res.success && res.wristband) {
+          setWristband(res.wristband);
+          setCreditRefresh(c => c + 1);
+          confetti({ particleCount: 40, spread: 50, origin: { y: 0.6 } });
+        }
+        return;
+      }
+
       const res = store.topUpWristband(wristband.uid, topUpAmount, selectedGateway);
       setIsProcessing(false);
+      setTapSuccess(res.success);
       if (res.success && res.wristband) {
         setWristband(res.wristband);
         setFeedback(res.message);
@@ -158,6 +184,7 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
       setIsProcessing(false);
       if (res.success && res.wristband) {
         setWristband(res.wristband);
+        setCreditRefresh(c => c + 1);
         setTapSuccess(true);
         setFeedback(res.message);
         setCart({});
@@ -394,7 +421,12 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
 
                 {/* Gateway Selection */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono opacity-70 block">Settlement Rail:</label>
+                  <div className="flex items-center justify-between text-[11px] font-mono opacity-75">
+                    <label>Settlement Rail:</label>
+                    <span>
+                      Available NXR Credits: {creditWallet.balanceTokens.toLocaleString()} NXR ({formatCurrency(creditWallet.balanceTokens, wristband.currency)})
+                    </span>
+                  </div>
                   <select
                     value={selectedGateway}
                     onChange={e => setSelectedGateway(e.target.value)}
@@ -402,9 +434,12 @@ export const CashlessTerminalModal: React.FC<CashlessTerminalModalProps> = ({
                       isDark ? 'bg-black border-white/20 text-white' : 'bg-white border-black/20 text-black'
                     }`}
                   >
-                    <option value="M-Pesa / Ozow EFT">M-Pesa Express / Ozow Instant EFT (Fastest)</option>
+                    <option value="NXR Loyalty Credits">
+                      NXR Cashless & Loyalty Credits ({creditWallet.balanceTokens.toLocaleString()} NXR available)
+                    </option>
+                    <option value="M-Pesa / Ozow EFT">M-Pesa / Instant EFT (Bank-to-Bank)</option>
                     <option value="Paystack Card & Bank">Paystack 3D-Secure Card & Bank Transfer</option>
-                    <option value="Flutterwave Mobile Money">Flutterwave Mobile Money & Barter</option>
+                    <option value="Flutterwave Mobile Money">Flutterwave Mobile Money</option>
                     <option value="Apple Pay / International Card">Apple Pay / Visa / Mastercard</option>
                   </select>
                 </div>

@@ -733,6 +733,64 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
     }
   };
 
+  const handleRotateAllInternalKeys = async () => {
+    setKeyRotateError(null);
+    setKeyRotateSuccess(null);
+
+    const adminToken = getAdminSessionToken();
+    if (!adminToken) {
+      handleLockPlatform();
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/admin/rotate-all-keys', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': adminToken,
+        },
+        body: JSON.stringify({
+          passkey: rotatePasskeyInput.trim() || undefined,
+          newAnonKey: newAnonKeyInput.trim() || undefined,
+          newUrl: newUrlInput.trim() || undefined,
+        }),
+      });
+
+      if (resp.status === 401) {
+        handleLockPlatform();
+        return;
+      }
+
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.nextAdminToken) {
+          setAdminSessionToken(data.nextAdminToken);
+        }
+        if (newUrlInput.trim() || newAnonKeyInput.trim()) {
+          rotateSupabaseKeys(newUrlInput.trim() || undefined, newAnonKeyInput.trim() || undefined);
+        }
+        setNewAnonKeyInput('');
+        setNewUrlInput('');
+        setRotatePasskeyInput('');
+        setKeyRotateSuccess(
+          `Rotated internal signing keys (Gen #${data.keyRotationGeneration}). Prior session & credit signatures invalidated.`
+        );
+        showNotification(
+          'success',
+          'All Internal Keys Rotated',
+          `Signing secrets rotated to Gen #${data.keyRotationGeneration}. Regenerate external SaaS keys in Settings > Secrets.`
+        );
+        await handlePingSupabase();
+      } else {
+        const err = await resp.json();
+        setKeyRotateError(err.error || 'Failed to rotate internal signing keys.');
+      }
+    } catch (err: any) {
+      setKeyRotateError(err.message || 'Full key rotation request failed.');
+    }
+  };
+
   const handleCopySchemaSql = () => {
     fetch('/supabase_schema.sql')
       .then(res => res.text())
@@ -4187,6 +4245,13 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
               })}
             </div>
 
+            <iframe
+              src="https://geoip.utils.com?embed=1"
+              title="Geo IP Locate"
+              loading="lazy"
+              className="w-full h-[600px] rounded-[8px] ring-1 ring-[#ccc] bg-white"
+            />
+
           </div>
         )}
 
@@ -5152,13 +5217,25 @@ export const SuperAdminPlatform: React.FC<SuperAdminPlatformProps> = ({
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-3">
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] opacity-80 leading-relaxed">
+                Note: Rotating internal keys regenerates server session &amp; NXR credit token HMAC secrets in memory immediately. External provider secrets (OpenAI, Alchemy, Gemini, Maps) must be regenerated in their provider consoles and updated in Settings &gt; Secrets.
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowKeyRotateModal(false)}
                   className="px-4 py-2 rounded-xl border border-white/10 hover:bg-white/10 text-xs cursor-pointer"
                 >
                   Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRotateAllInternalKeys}
+                  className="px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Rotate All Internal Signing Keys</span>
                 </button>
                 <button
                   type="submit"

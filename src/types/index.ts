@@ -117,9 +117,12 @@ export interface Order {
   currency: string;
   paymentStatus: 'created' | 'pending' | 'processing' | 'succeeded' | 'failed' | 'refunded';
   paymentMethod: string;
-  paymentProvider: 'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'stripe_card' | 'sandbox';
+  paymentProvider: 'paystack' | 'flutterwave' | 'mpesa' | 'ozow' | 'stripe_card' | 'nexora_credits' | 'sandbox';
   transactionReference: string;
   promoCodeApplied?: string;
+  creditsRedeemedTokens?: number;
+  creditsRedeemedMinor?: number;
+  creditsMintedTokens?: number;
   customAnswers?: Record<string, string>;
   createdAt: string;
   expiresAt: string;
@@ -149,6 +152,8 @@ export interface Ticket {
   qrPayload: string;
   refundReason?: string;
   customAnswers?: Record<string, string>;
+  tokenizationStatus?: 'tokenized' | 'not_tokenized' | 'revoked';
+  assetTokenId?: string;
 }
 
 export interface CheckInLog {
@@ -169,7 +174,16 @@ export interface LedgerEntry {
   orderId?: string;
   eventId?: string;
   organizerId: string;
-  type: 'customer_clearing' | 'organizer_payable' | 'platform_commission' | 'processing_fee' | 'payout_transfer' | 'refund_reserve' | 'refund_reversal';
+  type:
+    | 'customer_clearing'
+    | 'organizer_payable'
+    | 'platform_commission'
+    | 'processing_fee'
+    | 'payout_transfer'
+    | 'refund_reserve'
+    | 'refund_reversal'
+    | 'credit_token_mint'
+    | 'credit_token_redeem';
   debitMinor: number;
   creditMinor: number;
   currency: string;
@@ -200,10 +214,15 @@ export interface PromoCode {
   id: string;
   code: string;
   discountPercentage: number;
+  discountMinor?: number;
+  currency?: string;
+  pointsSpent?: number;
+  ownerEmail?: string;
   maxUses: number;
   timesUsed: number;
   eventId?: string; // all events if undefined
   active: boolean;
+  createdAt?: string;
 }
 
 export interface TeamMember {
@@ -623,6 +642,133 @@ export interface CommunityHighlight {
   userLiked?: boolean;
   timestamp: string;
   city: string;
+}
+
+export type CreditTokenTier = 'Bronze' | 'Silver' | 'Gold' | 'Obsidian';
+
+export type CreditTokenTxType =
+  | 'mint_cashback'
+  | 'mint_organizer_grant'
+  | 'mint_voucher'
+  | 'mint_pos_reward'
+  | 'redeem_checkout'
+  | 'convert_wristband'
+  | 'wristband_refund'
+  | 'transfer_out'
+  | 'transfer_in';
+
+export interface CreditTokenWallet {
+  id: string;
+  email: string;
+  displayName: string;
+  tokenSymbol: 'NXR';
+  currency: string;
+  balanceTokens: number;
+  lifetimeMintedTokens: number;
+  lifetimeRedeemedTokens: number;
+  loyaltyTier: CreditTokenTier;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface CreditTokenTransaction {
+  id: string;
+  walletId: string;
+  email: string;
+  txType: CreditTokenTxType;
+  tokensDelta: number;
+  balanceAfterTokens: number;
+  currency: string;
+  orderId?: string;
+  eventId?: string;
+  organizerId?: string;
+  wristbandUid?: string;
+  voucherCode?: string;
+  tokenSignature: string;
+  description: string;
+  createdAt: string;
+}
+
+export interface CreditTokenVoucher {
+  id: string;
+  code: string;
+  organizerId: string;
+  eventId?: string;
+  eventTitle?: string;
+  tokensAmount: number;
+  currency: string;
+  maxRedemptions: number;
+  redemptionsCount: number;
+  claimedByEmails: string[];
+  tokenSignature: string;
+  expiresAt?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export type BlockchainNetwork = 'polygon-pos' | 'base-mainnet' | 'nexora-chain';
+
+export type TicketTokenizationStatus = 'minted' | 'transferred' | 'revoked';
+
+export interface TokenizedTicketAsset {
+  assetId: string;
+  tokenId: string;
+  ticketId: string;
+  ticketCode: string;
+  eventId: string;
+  eventTitle: string;
+  tierName: string;
+  ownerEmail: string;
+  ownerName: string;
+  network: BlockchainNetwork;
+  contractAddress: string;
+  metadataHash: string;
+  txHash: string;
+  originalPriceMinor: number;
+  currency: string;
+  resaleProtection: {
+    enabled: boolean;
+    maxResaleMultiplierPct: number;
+    maxResalePriceMinor: number;
+    royaltyBps: number;
+    transferCount: number;
+    lockedUntil?: string;
+  };
+  loyaltyTracking: {
+    mintBonusTokens: number;
+    loyaltyBonusClaimed: boolean;
+    loyaltyPoints: number;
+    attendanceVerified: boolean;
+    pointsMultiplier: number;
+  };
+  status: TicketTokenizationStatus;
+  revokedReason?: string;
+  mintedAt: string;
+  updatedAt: string;
+}
+
+export interface UserLoyaltyProfile {
+  email: string;
+  loyaltyPoints: number;
+  pointsMultiplier: number;
+  tokenizedTicketCount: number;
+  verifiedAttendanceCount: number;
+  tierLabel: 'Standard' | 'Collector' | 'Patron' | 'Luminary';
+  updatedAt: string;
+}
+
+export interface LoyaltyDiscountVoucher {
+  id: string;
+  code: string;
+  email: string;
+  pointsRedeemed: number;
+  discountMinor: number;
+  currency: string;
+  eventId?: string;
+  eventTitle?: string;
+  voucherSignature: string;
+  used: boolean;
+  createdAt: string;
 }
 
 
